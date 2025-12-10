@@ -1,0 +1,5 @@
+{
+  "name": "See Your Future Health",
+  "description": "A predictive health visualization tool powered by Gemini that projects future health trajectories based on lifestyle factors.",
+  "requestFramePermissions": []
+}

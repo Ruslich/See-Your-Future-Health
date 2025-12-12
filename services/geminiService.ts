@@ -173,6 +173,111 @@ const calcDietScore = (quality: DietQuality, fastFood: FastFoodFrequency) => {
   return { score, level, qVal, ffVal };
 };
 
+// --- NEW MEASURED SCORING HELPERS ---
+
+const calcBPScore = (p: UserProfile): { score: number, basis: "measured"|"self_report"|"unknown", label: string } => {
+  // 1. Measured
+  if (p.bp && p.bp.systolic && p.bp.diastolic) {
+    const s = p.bp.systolic;
+    const d = p.bp.diastolic;
+    let score = 100;
+    
+    if (s >= 140 || d >= 90) score = 20;
+    else if ((s >= 130 && s <= 139) || (d >= 80 && d <= 89)) score = 50;
+    else if ((s >= 120 && s <= 129) && d < 80) score = 80;
+    else score = 100; // < 120 and < 80
+
+    // Meds cap
+    if (p.bp.onMeds && score > 80) score = 80;
+
+    // Recency penalty
+    if ((p.bp.measuredWithinMonths || 0) > 12) score = Math.max(0, score - 10);
+
+    return { score, basis: "measured", label: `${s}/${d} mmHg` };
+  }
+
+  // 2. History Proxy
+  if (p.existingConditions.includes("Hypertension")) {
+    return { score: 30, basis: "self_report", label: "Hypertension History" };
+  }
+
+  // 3. Unknown
+  return { score: 80, basis: "unknown", label: "No Diagnosis" };
+};
+
+const calcLipidsScore = (p: UserProfile): { score: number, basis: "measured"|"self_report"|"unknown", label: string } => {
+  if (p.lipids && (p.lipids.totalChol || p.lipids.ldl)) {
+    let score = 100;
+    let label = "";
+
+    // Prefer LDL
+    if (p.lipids.ldl) {
+      let ldl = p.lipids.ldl;
+      if (p.lipids.unit === 'mmol_L') ldl = ldl * 38.67;
+      
+      label = `LDL: ${Math.round(ldl)}`;
+      if (ldl >= 190) score = 10;
+      else if (ldl >= 160) score = 30;
+      else if (ldl >= 130) score = 50;
+      else if (ldl >= 100) score = 80;
+      else score = 100;
+    } else if (p.lipids.totalChol) {
+      let tc = p.lipids.totalChol;
+      if (p.lipids.unit === 'mmol_L') tc = tc * 38.67;
+
+      label = `Total: ${Math.round(tc)}`;
+      if (tc >= 240) score = 20;
+      else if (tc >= 200) score = 60;
+      else score = 100;
+    }
+
+    if (p.lipids.onMeds && score > 80) score = 80;
+    if ((p.lipids.measuredWithinMonths || 0) > 12) score = Math.max(0, score - 10);
+
+    return { score, basis: "measured", label };
+  }
+
+  if (p.existingConditions.includes("High Cholesterol")) {
+    return { score: 30, basis: "self_report", label: "History of High Chol." };
+  }
+
+  return { score: 80, basis: "unknown", label: "No Diagnosis" };
+};
+
+const calcGlucoseScore = (p: UserProfile): { score: number, basis: "measured"|"self_report"|"unknown", label: string } => {
+  if (p.glucose && (p.glucose.a1c || p.glucose.fasting)) {
+    let score = 100;
+    let label = "";
+
+    if (p.glucose.a1c) {
+      label = `A1c: ${p.glucose.a1c}%`;
+      if (p.glucose.a1c >= 6.5) score = 20;
+      else if (p.glucose.a1c >= 5.7) score = 60;
+      else score = 100;
+    } else if (p.glucose.fasting) {
+      let f = p.glucose.fasting;
+      if (p.glucose.unit === 'mmol_L') f = f * 18;
+      
+      label = `Fasting: ${Math.round(f)}`;
+      if (f >= 126) score = 20;
+      else if (f >= 100) score = 60;
+      else score = 100;
+    }
+
+    if (p.glucose.onMeds && score > 80) score = 80;
+    if ((p.glucose.measuredWithinMonths || 0) > 12) score = Math.max(0, score - 10);
+
+    return { score, basis: "measured", label };
+  }
+
+  if (p.existingConditions.includes("Type 2 Diabetes")) {
+    return { score: 10, basis: "self_report", label: "Type 2 Diabetes" };
+  }
+
+  return { score: 80, basis: "unknown", label: "No Diagnosis" };
+};
+
+
 // --- AHA Life's Essential 8 Calculation ---
 
 const calculateLe8Summary = (
@@ -183,6 +288,7 @@ const calculateLe8Summary = (
 ): Le8Summary => {
   const components: Le8ComponentScore[] = [];
   const sourceAHA = { title: "AHA Life's Essential 8", url: "https://www.heart.org/en/healthy-living/healthy-lifestyle/lifes-essential-8" };
+  const sourceSci = { title: "AHA LE8 Methodology", url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001078" };
 
   // 1. Diet (Proxy)
   components.push({
@@ -275,40 +381,37 @@ const calculateLe8Summary = (
     sources: [sourceAHA]
   });
 
-  // 6. Blood Lipids (Proxy)
-  const hasCholesterol = p.existingConditions.includes("High Cholesterol");
+  // 6. Blood Lipids (Measured or Proxy)
+  const lipids = calcLipidsScore(p);
   components.push({
     id: "blood_lipids",
     label: "Blood Lipids",
-    score: hasCholesterol ? 30 : 80,
-    basis: hasCholesterol ? "self_report" : "unknown",
-    valueLabel: hasCholesterol ? "History of High Chol." : "No Diagnosis",
-    note: hasCholesterol ? "Based on reported history." : "No cholesterol values provided; using conservative default.",
-    sources: [sourceAHA]
+    score: lipids.score,
+    basis: lipids.basis,
+    valueLabel: lipids.label,
+    sources: [sourceAHA, sourceSci]
   });
 
-  // 7. Blood Glucose (Proxy)
-  const hasDiabetes = p.existingConditions.includes("Type 2 Diabetes");
+  // 7. Blood Glucose (Measured or Proxy)
+  const glucose = calcGlucoseScore(p);
   components.push({
     id: "blood_glucose",
     label: "Blood Glucose",
-    score: hasDiabetes ? 10 : 80,
-    basis: hasDiabetes ? "self_report" : "unknown",
-    valueLabel: hasDiabetes ? "Type 2 Diabetes" : "No Diagnosis",
-    note: hasDiabetes ? "Based on reported diabetes." : "No glucose values provided; using conservative default.",
-    sources: [sourceAHA]
+    score: glucose.score,
+    basis: glucose.basis,
+    valueLabel: glucose.label,
+    sources: [sourceAHA, sourceSci]
   });
 
-  // 8. Blood Pressure (Proxy)
-  const hasBP = p.existingConditions.includes("Hypertension");
+  // 8. Blood Pressure (Measured or Proxy)
+  const bp = calcBPScore(p);
   components.push({
     id: "blood_pressure",
     label: "Blood Pressure",
-    score: hasBP ? 30 : 80,
-    basis: hasBP ? "self_report" : "unknown",
-    valueLabel: hasBP ? "Hypertension" : "No Diagnosis",
-    note: hasBP ? "Based on reported hypertension." : "No BP values provided; using conservative default.",
-    sources: [sourceAHA]
+    score: bp.score,
+    basis: bp.basis,
+    valueLabel: bp.label,
+    sources: [sourceAHA, sourceSci]
   });
 
   const totalScore = Math.round(components.reduce((acc, c) => acc + c.score, 0) / 8);
@@ -318,8 +421,12 @@ const calculateLe8Summary = (
   const unknownOrProxy = 8 - measuredOrSelf;
   
   let confidence: "low" | "medium" | "high" = "medium";
-  if (measuredOrSelf >= 5) confidence = "high";
-  if (unknownOrProxy >= 4) confidence = "low";
+  // Updated confidence logic: if we have measurements for BP/Lipids/Glucose, confidence is High.
+  const measuredVitals = components.filter(c => c.basis === "measured").length;
+  
+  if (measuredVitals >= 2) confidence = "high";
+  else if (measuredOrSelf >= 6) confidence = "medium"; // Good self report data
+  else confidence = "low";
 
   return {
     totalScore,
@@ -487,6 +594,11 @@ Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCU
 5. **Top Drivers**: 3–6 drivers explaining the difference. Keep impacts conservative.
 6. **Milestones**: 4–10 entries per scenario (e.g., "Meets activity guideline", "Risk threshold avoided"). Do not invent labs.
 
+**PROJECTION RULES (CRITICAL):**
+- If baseline BP/Lipids/Glucose values are PROVIDED (basis='measured'), do NOT project significant improvements unless the scenario explicitly improves behavior (weight loss, diet change). Even then, keep improvements conservative (<10% change).
+- If baseline values are UNKNOWN (basis='unknown'/'proxy'), keep these components stable or slightly worsening with age in the status_quo scenario. Do NOT invent specific lab improvements in future scenarios if baseline is unknown.
+- NEVER output a specific future BP (e.g., "120/80") if the user did not provide a starting BP. Discuss direction only.
+
 **CHART SPEC RULES (Follow Strictly):**
 1. **stacked_contribution_bar**: For each MAJOR risk card (Diabetes, CVD, etc.), break down the calculated risk/probability into 4-8 named contributors (e.g., "Age", "BMI", "Inactivity", "Diet"). 
    - Weights must be heuristic estimates based on standard risk models (e.g., FINDRISC) but must sum to the probability or 100%.
@@ -582,6 +694,11 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
       - Smoker: ${profile.smoker} (Years: ${profile.yearsSmoked}, Cigs/day: ${profile.cigarettesPerDay})
       - Years Since Quit: ${profile.yearsSinceQuit}
       
+      **MEASURED VITALS (If provided):**
+      - BP: ${profile.bp ? `${profile.bp.systolic}/${profile.bp.diastolic} (Meds: ${profile.bp.onMeds})` : "Not provided"}
+      - Lipids: ${profile.lipids ? `LDL ${profile.lipids.ldl} (Meds: ${profile.lipids.onMeds})` : "Not provided"}
+      - Glucose: ${profile.glucose ? `A1c ${profile.glucose.a1c}% (Meds: ${profile.glucose.onMeds})` : "Not provided"}
+
       **APP CALCULATED METRICS (Must use these):**
       1. FINDRISC (Diabetes): ${findriscScore}/26 (${diabetesProb}%)
       2. CVD Risk Proxy: ${cvdRiskPercent}%
@@ -607,7 +724,7 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
       - Generate 'scenarios' and 'chartSpecs' as per the schema rules.
       - Use LE8 score as the main trajectory score in 'trajectory' array.
       - When explaining, reference AHA Life's Essential 8 and include links (heart.org page is enough).
-      - Never claim lab measurements; if BP/lipids/glucose are proxies, say so.
+      - Never claim lab measurements were taken if basis is 'proxy' or 'unknown'.
       
       additionalMetrics: ${JSON.stringify(additionalMetrics)}
       debugCalculations: ${JSON.stringify(debugCalculations)}

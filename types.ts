@@ -51,6 +51,32 @@ export interface UserProfile {
   
   dietQuality: DietQuality;
   fastFoodFrequency: FastFoodFrequency;
+
+  // New Measured Vitals (Optional)
+  bp?: {
+    systolic?: number;
+    diastolic?: number;
+    onMeds?: boolean;
+    measuredWithinMonths?: number; // 1, 6, 12, 24
+  };
+  
+  lipids?: {
+    unit: "mg_dL" | "mmol_L";
+    totalChol?: number;
+    ldl?: number;
+    hdl?: number;
+    triglycerides?: number;
+    onMeds?: boolean;
+    measuredWithinMonths?: number;
+  };
+  
+  glucose?: {
+    unit: "mg_dL" | "mmol_L";
+    a1c?: number;            // %
+    fasting?: number;
+    onMeds?: boolean;
+    measuredWithinMonths?: number;
+  };
 }
 
 export interface SourceLink {
@@ -235,6 +261,7 @@ export type StepField =
   | 'activity' 
   | 'habits' 
   | 'medical' 
+  | 'measurements' 
   | 'diet';
 
-export const STEPS: StepField[] = ['basic', 'body', 'activity', 'habits', 'medical', 'diet'];
+export const STEPS: StepField[] = ['basic', 'body', 'activity', 'habits', 'medical', 'measurements', 'diet'];

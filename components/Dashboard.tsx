@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SimulationResponse, UserProfile, RiskCard, ActivityLevel, DietQuality, FastFoodFrequency, Gender, WeightPoint, ChartSpec, ScenarioItem, Le8ComponentScore } from '../types';
 import { generateHealthProjection, explainHealthInsight, chatWithHealthAssistant } from '../services/geminiService';
-import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight, MessageSquare, Bot, User, CheckCircle2 } from 'lucide-react';
+import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight, MessageSquare, Bot, User, CheckCircle2, Eye, Copy, Flag } from 'lucide-react';
 import BulletTargetCard from './BulletTargetCard';
 import StackedContributionCard from './StackedContributionCard';
 import MilestoneTimelineCard from './MilestoneTimelineCard';
@@ -207,7 +207,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
               })}
 
               {/* Paths */}
-              <path d={generatePath(data)} fill="none" stroke={simulatedData ? "#cbd5e1" : "#0d9488"} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d={generatePath(data)} fill="none" stroke={simulatedData ? "#cbd5e1" : (type === 'health' ? "#0d9488" : "#6366f1")} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
               {simulatedData && (
                 <path d={generatePath(simulatedData)} fill="none" stroke="#10b981" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
               )}
@@ -223,7 +223,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
                    />
                    
                    {/* Original Point */}
-                   <circle cx={currentCoord?.x} cy={currentCoord?.y} r="8" fill="white" stroke={simulatedData ? "#94a3b8" : "#0d9488"} strokeWidth="3" />
+                   <circle cx={currentCoord?.x} cy={currentCoord?.y} r="8" fill="white" stroke={simulatedData ? "#94a3b8" : (type === 'health' ? "#0d9488" : "#6366f1")} strokeWidth="3" />
                    
                    {/* Simulated Point */}
                    {currentSimPoint && (
@@ -250,7 +250,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
                  
                  <div className="flex justify-between items-center mb-1">
                     <div className="flex items-center gap-2">
-                       <div className={`w-2 h-2 rounded-full ${simulatedData ? 'bg-slate-400' : 'bg-teal-600'}`}></div>
+                       <div className={`w-2 h-2 rounded-full ${simulatedData ? 'bg-slate-400' : (type === 'health' ? 'bg-teal-600' : 'bg-indigo-600')}`}></div>
                        <span className="text-sm font-semibold text-slate-600">Current Path</span>
                     </div>
                     <span className="text-lg font-bold text-slate-800">{currentDataPoint[dataKey]}</span>
@@ -260,7 +260,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
                    <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-1">
                       <div className="flex items-center gap-2">
                          <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                         <span className="text-sm font-semibold text-emerald-700">Modified</span>
+                         <span className="text-sm font-semibold text-emerald-700">{label}</span>
                       </div>
                       <span className="text-lg font-bold text-emerald-600">{currentSimPoint[dataKey]}</span>
                    </div>
@@ -437,8 +437,9 @@ const WeightChart: React.FC<{
 const RiskCardComponent: React.FC<{ 
   card: RiskCard; 
   isActive: boolean;
-  userProfile: UserProfile; 
-}> = ({ card, isActive, userProfile }) => {
+  userProfile: UserProfile;
+  onViewOrgan: (organ: string) => void;
+}> = ({ card, isActive, userProfile, onViewOrgan }) => {
   const [showChat, setShowChat] = useState(false);
   const [chatResponse, setChatResponse] = useState<string | null>(null);
   const [loadingChat, setLoadingChat] = useState(false);
@@ -481,25 +482,37 @@ const RiskCardComponent: React.FC<{
         <p className="text-lg font-semibold text-slate-700 leading-tight italic">"{card.summary}"</p>
       </div>
 
-      {/* Ask AI Section */}
-      <div className="mt-auto pt-4 border-t border-slate-200/50">
-        {!showChat ? (
-          <button onClick={handleAskAI} className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-800 transition-colors">
-            <MessageCircle size={12} /> Ask AI: Why this prediction?
-          </button>
-        ) : (
-          <div className="bg-white/80 rounded-lg p-3 text-sm text-slate-700 shadow-inner border border-indigo-100 animate-fade-in-up">
-             <div className="flex justify-between items-center mb-2">
-                <span className="text-[9px] font-bold text-indigo-500 uppercase">AI Explanation</span>
-                <button onClick={() => setShowChat(false)}><X size={12} className="text-slate-400" /></button>
-             </div>
-             {loadingChat ? (
-               <div className="flex items-center gap-2 text-slate-400"><RefreshCw size={12} className="animate-spin" /> Analyzing models...</div>
-             ) : (
-               <p className="leading-relaxed whitespace-pre-wrap break-words">{chatResponse}</p>
-             )}
-          </div>
-        )}
+      <div className="mt-auto border-t border-slate-200/50 pt-4 flex flex-col gap-3">
+         {/* View on 3D Model Button */}
+         {card.organ && (
+            <button 
+              onClick={() => onViewOrgan(card.organ!)}
+              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-teal-700 transition-colors self-start"
+            >
+              <Eye size={12} /> View on 3D Model
+            </button>
+         )}
+
+         {/* Ask AI Section */}
+         <div>
+          {!showChat ? (
+            <button onClick={handleAskAI} className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-indigo-600 hover:text-indigo-800 transition-colors">
+              <MessageCircle size={12} /> Ask AI: Why this prediction?
+            </button>
+          ) : (
+            <div className="bg-white/80 rounded-lg p-3 text-sm text-slate-700 shadow-inner border border-indigo-100 animate-fade-in-up">
+              <div className="flex justify-between items-center mb-2">
+                  <span className="text-[9px] font-bold text-indigo-500 uppercase">AI Explanation</span>
+                  <button onClick={() => setShowChat(false)}><X size={12} className="text-slate-400" /></button>
+              </div>
+              {loadingChat ? (
+                <div className="flex items-center gap-2 text-slate-400"><RefreshCw size={12} className="animate-spin" /> Analyzing models...</div>
+              ) : (
+                <p className="leading-relaxed whitespace-pre-wrap break-words">{chatResponse}</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -751,6 +764,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
   const [simulationData, setSimulationData] = useState<SimulationResponse | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [expandedChart, setExpandedChart] = useState<'health' | 'weight' | null>(null);
+  const [highlightOrgan, setHighlightOrgan] = useState<string | null>(null);
   
   // Right Panel State (3D Model vs Chat)
   const [rightPanelMode, setRightPanelMode] = useState<'3d' | 'chat'>('3d');
@@ -801,6 +815,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
     }
   };
 
+  const handleViewOrgan = (organ: string) => {
+    setRightPanelMode('3d');
+    setHighlightOrgan(organ);
+  };
+
   const lifeExpectancyDelta = simulationData ? simulationData.lifeExpectancy - data.lifeExpectancy : 0;
   const activeLabels = Object.keys(activeScenarios).join(" + ");
 
@@ -821,6 +840,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
   const displayWeightComparison = simulationData ? simulationData.weightTrajectory : (selectedScenarioId !== 'status_quo' ? scenarioWeightTrajectory : null);
   const displayLabel = simulationData ? (activeLabels || 'Modified') : (selectedScenario?.label || 'Projected');
 
+  // Big Changes Scenario specifically for Section D
+  const bigChangesScenario = activeData.scenarios?.items?.find(i => i.id === 'big_changes');
+
   return (
     <div className="flex flex-col lg:flex-row h-screen overflow-hidden bg-slate-50">
       
@@ -829,7 +851,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
         <ExpandedChartOverlay 
           type={expandedChart}
           data={expandedChart === 'health' ? data.trajectory : activeData.weightTrajectory}
-          simulatedData={expandedChart === 'health' ? (simulationData?.trajectory || scenarioHealthTrajectory || undefined) : undefined}
+          simulatedData={
+            expandedChart === 'health' 
+              ? (simulationData?.trajectory || scenarioHealthTrajectory || undefined) 
+              : (simulationData?.weightTrajectory || scenarioWeightTrajectory || undefined)
+          }
           dataKey={expandedChart === 'health' ? 'score' : 'weight'}
           label={displayLabel}
           userProfile={userProfile}
@@ -852,7 +878,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
         <div className="flex-1 overflow-y-auto p-4 lg:p-6 scrollbar-hide">
           <div className="max-w-3xl mx-auto space-y-6 fade-in pb-8">
              
-             {/* 1. Score Cards */}
+             {/* A) Top Section: Score Cards + Metrics + LE8 */}
             <div className="flex flex-row gap-3">
                <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between group">
                  <div>
@@ -879,7 +905,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
             
             <p className="text-[9px] text-slate-400 italic text-right -mt-4 mb-4">*Estimated from your inputs; some components use proxies if no measurements were provided.</p>
 
-            {/* 2. Detailed Metrics Panel (New) */}
             <div className="bg-white/60 p-4 rounded-2xl border border-white shadow-sm grid grid-cols-2 md:grid-cols-4 gap-4">
                <div className="flex flex-col items-center p-2 bg-white rounded-xl border border-slate-100">
                   <span className="text-[9px] font-bold text-slate-400 uppercase mb-1 flex items-center gap-1"><Scale size={10}/> BMI</span>
@@ -899,13 +924,34 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                </div>
             </div>
 
-            {/* 2b. LE8 Breakdown */}
             {activeData.additionalMetrics?.ahaLe8?.components && (
                <Le8Breakdown components={activeData.additionalMetrics.ahaLe8.components} />
             )}
 
-            {/* 3. Scenario & Simulation Controls */}
-            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+            {/* B) Detailed Risk Analysis (Flashcards Carousel) - Moved Here */}
+            <div className="relative group mt-8">
+              <div className="flex items-center justify-between mb-2 px-1">
+                 <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Detailed Risk Analysis</h2>
+                 <div className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                   {currentCardIndex + 1} of {activeData.riskCards.length}
+                 </div>
+              </div>
+              <div className="overflow-hidden py-4 -my-4 px-1"> 
+                <div className="flex transition-transform duration-500 ease-out" style={{ transform: `translateX(-${currentCardIndex * 87}%)` }}>
+                  {activeData.riskCards.map((card, idx) => (
+                    <div key={idx} className="w-[85%] shrink-0 mr-[2%] transition-all duration-500">
+                      <RiskCardComponent card={card} isActive={idx === currentCardIndex} userProfile={userProfile} onViewOrgan={handleViewOrgan} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <button onClick={() => currentCardIndex > 0 && setCurrentCardIndex(p => p - 1)} disabled={currentCardIndex === 0} className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 w-10 h-10 bg-white border border-slate-200 rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:text-teal-600 transition-all ${currentCardIndex === 0 ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}><ChevronLeft size={20} /></button>
+              <button onClick={() => currentCardIndex < activeData.riskCards.length - 1 && setCurrentCardIndex(p => p + 1)} disabled={currentCardIndex === activeData.riskCards.length - 1} className={`absolute right-4 top-1/2 -translate-y-1/2 translate-x-0 w-12 h-12 bg-slate-900 border border-slate-700 rounded-full shadow-xl flex items-center justify-center text-white hover:bg-slate-800 transition-all active:scale-95 ${currentCardIndex === activeData.riskCards.length - 1 ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}><ChevronRight size={24} /></button>
+            </div>
+
+
+            {/* C) Compare Future Scenarios Block */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm mt-8">
                
                {/* Scenario Tabs */}
                {activeData.scenarios?.items && (
@@ -930,8 +976,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                       ))}
                     </div>
 
-                    {/* Scenario Details */}
-                    {selectedScenario && selectedScenarioId !== 'status_quo' && (
+                    {/* Scenario Details (Generic for tabs) */}
+                    {selectedScenario && selectedScenarioId !== 'status_quo' && selectedScenarioId !== 'big_changes' && (
                        <div className="mt-4 bg-slate-50 border border-slate-100 rounded-xl p-4 animate-fade-in">
                           <div className="flex items-start justify-between mb-3">
                              <div className="text-sm font-bold text-slate-800">{selectedScenario.label}</div>
@@ -939,7 +985,6 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                                Confidence: <span className="uppercase">{selectedScenario.uncertainty?.level || 'Medium'}</span>
                              </div>
                           </div>
-                          
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                              <div>
                                 <h5 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Key Drivers</h5>
@@ -1022,7 +1067,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                  </div>
                )}
 
-               {/* 4. Charts Area */}
+               {/* Charts Area */}
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {(data.trajectory && data.trajectory.length > 0) && (
                     <ComparisonChart 
@@ -1042,8 +1087,84 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                   )}
                </div>
 
-               {/* NEW: Chart Specs & Targets */}
-               {activeData.chartSpecs && activeData.chartSpecs.length > 0 && (
+               {/* Scenario Deep Dive (for Big Changes) */}
+               {bigChangesScenario && selectedScenarioId === 'big_changes' && (
+                  <div className="bg-indigo-50 border border-indigo-100 p-5 rounded-2xl shadow-sm mt-6">
+                      <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 mb-1">Scenario Deep Dive</div>
+                            <h3 className="text-lg font-black text-indigo-900">{bigChangesScenario.label}</h3>
+                          </div>
+                          <div className="text-[10px] bg-white px-3 py-1.5 rounded-full border border-indigo-100 text-indigo-600 font-bold shadow-sm">
+                            {bigChangesScenario.uncertainty?.level === 'low' ? 'High Confidence' : 'Model Estimate'}
+                          </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="bg-white/60 rounded-xl p-4 border border-indigo-100/50">
+                            <h5 className="text-[10px] font-bold text-indigo-400 uppercase mb-3 flex items-center gap-1.5"><Zap size={12}/> Top Health Drivers</h5>
+                            <ul className="space-y-2">
+                                {bigChangesScenario.topDrivers?.map((driver, idx) => (
+                                  <li key={idx} className="flex items-start gap-2">
+                                    <div className="mt-1"><CheckCircle2 size={12} className="text-emerald-500" /></div>
+                                    <div>
+                                      <div className="text-xs font-bold text-slate-700">{driver.label}</div>
+                                      <div className="text-[10px] text-slate-500">{driver.evidenceNote}</div>
+                                    </div>
+                                  </li>
+                                ))}
+                            </ul>
+                          </div>
+                          <div className="bg-white/60 rounded-xl p-4 border border-indigo-100/50">
+                            <h5 className="text-[10px] font-bold text-indigo-400 uppercase mb-3 flex items-center gap-1.5"><Activity size={12}/> Lifestyle Adjustments</h5>
+                            <div className="space-y-2">
+                                {bigChangesScenario.modifiedInputs?.map((input, idx) => (
+                                  <div key={idx} className="flex items-center justify-between text-xs p-2 bg-white rounded border border-slate-100">
+                                      <span className="font-semibold text-slate-600 capitalize">{input.field.replace(/([A-Z])/g, ' $1').trim()}</span>
+                                      <span className="font-bold text-indigo-600">{input.to}</span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                      </div>
+                  </div>
+               )}
+            </div>
+
+            {/* D) Big Changes Milestones Block (Moved Here) */}
+            <div className="mt-8">
+                <div className="flex items-center gap-2 mb-4 px-2">
+                  <Flag size={14} className="text-teal-600" />
+                  <div>
+                      <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">BIG CHANGES: HEALTH TRAJECTORY MILESTONES</h2>
+                      <p className="text-[10px] text-slate-400 font-medium">Key predicted health events with significant lifestyle transformations</p>
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  {activeData.chartSpecs
+                      .filter(s => s.type === 'timeline_milestones')
+                      // Filter for relevant milestones (fallback to generic if no specific ID match)
+                      .filter(s => {
+                         if (s.id && s.id.includes(selectedScenarioId)) return true;
+                         // If we are in default view, show default milestones
+                         if (selectedScenarioId === 'status_quo' && !s.id) return true;
+                         // Show all if loosely matched
+                         return !s.id || s.id === 'timeline_milestones';
+                      })
+                      .map((spec, i) => (
+                        <MilestoneTimelineCard key={i} spec={spec} />
+                  ))}
+                  {/* Fallback for when no specific ID matches but we have generic milestones */}
+                  {activeData.chartSpecs.filter(s => s.type === 'timeline_milestones' && !s.id).length > 0 && selectedScenarioId === 'status_quo' && 
+                     activeData.chartSpecs.filter(s => s.type === 'timeline_milestones' && !s.id).map((spec, i) => (
+                        <MilestoneTimelineCard key={`gen-${i}`} spec={spec} />
+                     ))
+                  }
+                </div>
+            </div>
+
+            {/* E) Insights & Targets */}
+            {activeData.chartSpecs && activeData.chartSpecs.length > 0 && (
                  <div className="mt-8 pt-6 border-t border-slate-100">
                     <div className="flex items-center gap-2 mb-4">
                        <Target size={14} className="text-indigo-500" />
@@ -1063,54 +1184,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                           <StackedContributionCard key={i} spec={spec} />
                        ))}
                     </div>
-
-                    {/* Timeline Milestones (Filtered by Selected Scenario if possible) */}
-                    <div className="space-y-4">
-                       {activeData.chartSpecs
-                         .filter(s => s.type === 'timeline_milestones')
-                         .filter(s => {
-                           // Try to match timeline to selected scenario
-                           // Fallback to showing all if id matching isn't explicit
-                           if (s.id && s.id.includes(selectedScenarioId)) return true;
-                           // If chart spec ID is generic or we just want to show timelines for current context
-                           return s.id === selectedScenarioId; 
-                         })
-                         .map((spec, i) => (
-                           <MilestoneTimelineCard key={i} spec={spec} />
-                       ))}
-                       {/* Fallback: if no specific timeline matched the ID, maybe show a generic one or none */}
-                       {activeData.chartSpecs.filter(s => s.type === 'timeline_milestones' && !s.id.includes('status_quo') && !s.id.includes('small_changes') && !s.id.includes('big_changes')).length > 0 && 
-                          activeData.chartSpecs.filter(s => s.type === 'timeline_milestones' && !s.id.includes('status_quo') && !s.id.includes('small_changes') && !s.id.includes('big_changes')).map((spec, i) => (
-                             <MilestoneTimelineCard key={`gen-${i}`} spec={spec} />
-                          ))
-                       }
-                    </div>
                  </div>
-               )}
-
-            </div>
-
-            {/* 5. Risk Cards Carousel */}
-            <div className="h-px bg-slate-200 w-full my-4"></div>
-            <div className="relative group">
-              <div className="flex items-center justify-between mb-2 px-1">
-                 <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Detailed Risk Analysis</h2>
-                 <div className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                   {currentCardIndex + 1} of {activeData.riskCards.length}
-                 </div>
-              </div>
-              <div className="overflow-hidden py-4 -my-4 px-1"> 
-                <div className="flex transition-transform duration-500 ease-out" style={{ transform: `translateX(-${currentCardIndex * 87}%)` }}>
-                  {activeData.riskCards.map((card, idx) => (
-                    <div key={idx} className="w-[85%] shrink-0 mr-[2%] transition-all duration-500">
-                      <RiskCardComponent card={card} isActive={idx === currentCardIndex} userProfile={userProfile} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <button onClick={() => currentCardIndex > 0 && setCurrentCardIndex(p => p - 1)} disabled={currentCardIndex === 0} className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 w-10 h-10 bg-white border border-slate-200 rounded-full shadow-lg flex items-center justify-center text-slate-600 hover:text-teal-600 transition-all ${currentCardIndex === 0 ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}><ChevronLeft size={20} /></button>
-              <button onClick={() => currentCardIndex < activeData.riskCards.length - 1 && setCurrentCardIndex(p => p + 1)} disabled={currentCardIndex === activeData.riskCards.length - 1} className={`absolute right-4 top-1/2 -translate-y-1/2 translate-x-0 w-12 h-12 bg-slate-900 border border-slate-700 rounded-full shadow-xl flex items-center justify-center text-white hover:bg-slate-800 transition-all active:scale-95 ${currentCardIndex === activeData.riskCards.length - 1 ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}><ChevronRight size={24} /></button>
-            </div>
+            )}
 
             {/* Medical Disclaimer */}
             <div className="bg-slate-100 p-4 rounded-xl text-[10px] text-slate-500 leading-relaxed border border-slate-200 mt-8">
@@ -1148,7 +1223,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
           <>
             <div className="absolute top-6 left-6 z-10 flex flex-col gap-2 pointer-events-none">
               <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-lg text-[10px] font-semibold text-white/90 flex items-center gap-1.5">
-                  <Activity size={12} className="text-teal-400"/> Interactive 3D Model
+                  <Activity size={12} className="text-teal-400"/> 
+                  <span>3D Model</span>
               </div>
               <div className={`transition-all duration-500 transform ${currentOrgan ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0'}`}>
                   <div className="bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl max-w-[200px]">
@@ -1157,6 +1233,26 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                   </div>
               </div>
             </div>
+
+            {/* Highlight Overlay */}
+            {highlightOrgan && (
+               <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-xl shadow-2xl flex flex-col gap-2 border border-white/10 animate-fade-in-up min-w-[240px]">
+                  <div className="flex justify-between items-start gap-4">
+                      <div>
+                         <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Suggested organ to explore</div>
+                         <div className="text-xl font-black text-white capitalize">{highlightOrgan}</div>
+                      </div>
+                      <button onClick={(e) => { e.stopPropagation(); setHighlightOrgan(null); }} className="text-slate-400 hover:text-white transition-colors"><X size={14}/></button>
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(highlightOrgan); }}
+                    className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-[10px] font-bold uppercase transition-colors flex items-center justify-center gap-2"
+                  >
+                     <Copy size={12} /> Copy Name
+                  </button>
+               </div>
+            )}
+
             <iframe src="https://www.zygotebody.com" className="w-full h-full border-0 opacity-80 hover:opacity-100 transition-opacity duration-700" title="Zygote Body" allow="autoplay; encrypted-media" />
           </>
         ) : (

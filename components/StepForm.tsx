@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserProfile, Gender, ActivityLevel, DietQuality, FastFoodFrequency, STEPS } from '../types';
-import { ArrowRight, ArrowLeft, CheckCircle2, Footprints, Armchair, Stethoscope, Utensils, Beer, Cigarette, Moon } from 'lucide-react';
+import { ArrowRight, ArrowLeft, CheckCircle2, Footprints, Armchair, Stethoscope, Utensils, Beer, Cigarette, Moon, Activity, Thermometer, Droplet } from 'lucide-react';
 
 interface StepFormProps {
   onComplete: (data: UserProfile) => void;
@@ -29,7 +29,12 @@ const INITIAL_DATA: UserProfile = {
   maxDrinksPerOccasion: 1,
 
   dietQuality: DietQuality.Average,
-  fastFoodFrequency: FastFoodFrequency.Weekly
+  fastFoodFrequency: FastFoodFrequency.Weekly,
+  
+  // Optional measurements start undefined
+  bp: undefined,
+  lipids: undefined,
+  glucose: undefined
 };
 
 const COMMON_CONDITIONS = [
@@ -41,6 +46,13 @@ const COMMON_CONDITIONS = [
   "Arthritis",
   "Depression",
   "Migraines"
+];
+
+const RECENCY_OPTIONS = [
+  { val: 1, label: "< 1 mo" },
+  { val: 6, label: "1-6 mo" },
+  { val: 12, label: "6-12 mo" },
+  { val: 24, label: "12+ mo" }
 ];
 
 const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
@@ -77,6 +89,16 @@ const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
       }
     });
   };
+
+  // Measurement Initialization Helpers
+  const initBP = () => updateField('bp', { systolic: 120, diastolic: 80, measuredWithinMonths: 6, onMeds: false });
+  const clearBP = () => updateField('bp', undefined);
+  
+  const initLipids = () => updateField('lipids', { unit: 'mg_dL', measuredWithinMonths: 6, onMeds: false });
+  const clearLipids = () => updateField('lipids', undefined);
+  
+  const initGlucose = () => updateField('glucose', { unit: 'mg_dL', measuredWithinMonths: 6, onMeds: false });
+  const clearGlucose = () => updateField('glucose', undefined);
 
   const renderStep = () => {
     switch (currentStep) {
@@ -425,6 +447,137 @@ const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
             </div>
           </div>
         );
+      case 'measurements':
+        return (
+          <div className="space-y-6 fade-in pb-2">
+            <div className="flex items-center gap-2">
+               <Activity className="text-rose-500" size={24}/>
+               <h2 className="text-xl md:text-2xl font-bold text-slate-800">Optional Measurements</h2>
+            </div>
+            <p className="text-sm text-slate-500 leading-relaxed mb-4">
+              Providing actual values improves your LE8 score accuracy. If you don't know them, skip this step and we'll use conservative estimates.
+            </p>
+
+            {/* Blood Pressure */}
+            <div className="bg-white/60 p-4 rounded-xl border border-white/60">
+               <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                     <div className="p-1.5 bg-rose-100 text-rose-600 rounded-lg"><Activity size={14}/></div>
+                     <span className="text-sm font-bold text-slate-700">Blood Pressure</span>
+                  </div>
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                     <button onClick={clearBP} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${!data.bp ? 'bg-white shadow text-slate-700' : 'text-slate-400'}`}>No</button>
+                     <button onClick={initBP} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${data.bp ? 'bg-rose-500 text-white shadow' : 'text-slate-400'}`}>Yes</button>
+                  </div>
+               </div>
+               
+               {data.bp && (
+                 <div className="grid grid-cols-2 gap-4 animate-fade-in pt-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Systolic</label>
+                      <input type="number" value={data.bp.systolic} onChange={(e) => updateField('bp', { ...data.bp!, systolic: parseInt(e.target.value) })} className="w-full p-2 rounded-lg border border-slate-200 bg-white" placeholder="120" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase">Diastolic</label>
+                      <input type="number" value={data.bp.diastolic} onChange={(e) => updateField('bp', { ...data.bp!, diastolic: parseInt(e.target.value) })} className="w-full p-2 rounded-lg border border-slate-200 bg-white" placeholder="80" />
+                    </div>
+                    <div className="col-span-2 flex items-center gap-4">
+                       <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <input type="checkbox" checked={data.bp.onMeds} onChange={(e) => updateField('bp', { ...data.bp!, onMeds: e.target.checked })} className="accent-rose-500"/>
+                          Taking BP Meds?
+                       </label>
+                       <select value={data.bp.measuredWithinMonths} onChange={(e) => updateField('bp', { ...data.bp!, measuredWithinMonths: parseInt(e.target.value) })} className="text-xs p-1 bg-transparent border-b border-slate-300 outline-none text-slate-500">
+                          {RECENCY_OPTIONS.map(o => <option key={o.val} value={o.val}>Tested {o.label}</option>)}
+                       </select>
+                    </div>
+                 </div>
+               )}
+            </div>
+
+            {/* Lipids */}
+            <div className="bg-white/60 p-4 rounded-xl border border-white/60">
+               <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                     <div className="p-1.5 bg-amber-100 text-amber-600 rounded-lg"><Droplet size={14}/></div>
+                     <span className="text-sm font-bold text-slate-700">Cholesterol</span>
+                  </div>
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                     <button onClick={clearLipids} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${!data.lipids ? 'bg-white shadow text-slate-700' : 'text-slate-400'}`}>No</button>
+                     <button onClick={initLipids} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${data.lipids ? 'bg-amber-500 text-white shadow' : 'text-slate-400'}`}>Yes</button>
+                  </div>
+               </div>
+
+               {data.lipids && (
+                 <div className="space-y-3 animate-fade-in pt-2">
+                    <div className="flex justify-end">
+                       <button onClick={() => updateField('lipids', { ...data.lipids!, unit: data.lipids!.unit === 'mg_dL' ? 'mmol_L' : 'mg_dL' })} className="text-[10px] font-bold text-indigo-500 uppercase bg-indigo-50 px-2 py-1 rounded">Unit: {data.lipids.unit === 'mg_dL' ? 'mg/dL' : 'mmol/L'}</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">Total Chol</label>
+                          <input type="number" value={data.lipids.totalChol || ''} onChange={(e) => updateField('lipids', { ...data.lipids!, totalChol: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg border border-slate-200 bg-white" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">LDL (Bad)</label>
+                          <input type="number" value={data.lipids.ldl || ''} onChange={(e) => updateField('lipids', { ...data.lipids!, ldl: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg border border-slate-200 bg-white" />
+                        </div>
+                    </div>
+                    <div className="col-span-2 flex items-center gap-4">
+                       <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <input type="checkbox" checked={data.lipids.onMeds} onChange={(e) => updateField('lipids', { ...data.lipids!, onMeds: e.target.checked })} className="accent-amber-500"/>
+                          Taking Statins?
+                       </label>
+                       <select value={data.lipids.measuredWithinMonths} onChange={(e) => updateField('lipids', { ...data.lipids!, measuredWithinMonths: parseInt(e.target.value) })} className="text-xs p-1 bg-transparent border-b border-slate-300 outline-none text-slate-500">
+                          {RECENCY_OPTIONS.map(o => <option key={o.val} value={o.val}>Tested {o.label}</option>)}
+                       </select>
+                    </div>
+                 </div>
+               )}
+            </div>
+
+            {/* Glucose */}
+            <div className="bg-white/60 p-4 rounded-xl border border-white/60">
+               <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                     <div className="p-1.5 bg-blue-100 text-blue-600 rounded-lg"><Thermometer size={14}/></div>
+                     <span className="text-sm font-bold text-slate-700">Blood Sugar</span>
+                  </div>
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                     <button onClick={clearGlucose} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${!data.glucose ? 'bg-white shadow text-slate-700' : 'text-slate-400'}`}>No</button>
+                     <button onClick={initGlucose} className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${data.glucose ? 'bg-blue-500 text-white shadow' : 'text-slate-400'}`}>Yes</button>
+                  </div>
+               </div>
+
+               {data.glucose && (
+                 <div className="space-y-3 animate-fade-in pt-2">
+                    <div className="flex justify-end">
+                       <button onClick={() => updateField('glucose', { ...data.glucose!, unit: data.glucose!.unit === 'mg_dL' ? 'mmol_L' : 'mg_dL' })} className="text-[10px] font-bold text-indigo-500 uppercase bg-indigo-50 px-2 py-1 rounded">Unit: {data.glucose.unit === 'mg_dL' ? 'mg/dL' : 'mmol/L'}</button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">HbA1c (%)</label>
+                          <input type="number" step="0.1" value={data.glucose.a1c || ''} onChange={(e) => updateField('glucose', { ...data.glucose!, a1c: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg border border-slate-200 bg-white" placeholder="5.7"/>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase">Fasting Glucose</label>
+                          <input type="number" value={data.glucose.fasting || ''} onChange={(e) => updateField('glucose', { ...data.glucose!, fasting: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg border border-slate-200 bg-white" />
+                        </div>
+                    </div>
+                    <div className="col-span-2 flex items-center gap-4">
+                       <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                          <input type="checkbox" checked={data.glucose.onMeds} onChange={(e) => updateField('glucose', { ...data.glucose!, onMeds: e.target.checked })} className="accent-blue-500"/>
+                          Diabetic Meds?
+                       </label>
+                       <select value={data.glucose.measuredWithinMonths} onChange={(e) => updateField('glucose', { ...data.glucose!, measuredWithinMonths: parseInt(e.target.value) })} className="text-xs p-1 bg-transparent border-b border-slate-300 outline-none text-slate-500">
+                          {RECENCY_OPTIONS.map(o => <option key={o.val} value={o.val}>Tested {o.label}</option>)}
+                       </select>
+                    </div>
+                 </div>
+               )}
+            </div>
+
+          </div>
+        )
       case 'diet':
          return (
           <div className="space-y-6 fade-in pb-2">

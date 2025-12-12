@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { UserProfile, SimulationResponse, Gender, ActivityLevel, DietQuality } from "../types";
+import { UserProfile, SimulationResponse, Gender, ActivityLevel, DietQuality, FastFoodFrequency } from "../types";
 
 // --- Metric Calculators (Deterministic) ---
 
@@ -35,81 +35,160 @@ const calculateFindrisc = (p: UserProfile, bmi: number) => {
   }
   
   // 4. Physical Activity ( < 4h/week considered 'No')
-  // Mapping: Sedentary & Light -> 'No' (2 points), Moderate & Active -> 'Yes' (0 points)
   if (p.activityLevel === ActivityLevel.Sedentary || p.activityLevel === ActivityLevel.Light) {
     score += 2;
   }
   
-  // 5. Diet (Vegetables/Fruit daily)
-  // Mapping: Poor -> 'No' (1 point), Good/Average -> 'Yes' (0 points - assuming Average eats some)
+  // 5. Diet
   if (p.dietQuality === DietQuality.Poor) {
-    score += 1; // Actually FINDRISC gives 1 point for not eating veggies daily
+    score += 1;
   }
 
-  // 6. Meds for HBP (Not asked, assume 0)
   if (p.existingConditions.includes("Hypertension")) score += 2;
-
-  // 7. History of high glucose (Not asked, assume 0)
-  
-  // 8. Family History (Not asked, assume 0)
 
   return score;
 };
 
-// Simplified CVD Risk Proxy (Roughly inspired by risk factors, NOT valid QRISK3)
+// Simplified CVD Risk Proxy
 const calculateCVDRiskProxy = (p: UserProfile, bmi: number) => {
-  let riskScore = 1.0; // Base 1% 10y risk
+  let riskScore = 1.0; 
 
-  // Age factor
   if (p.age > 40) riskScore += (p.age - 40) * 0.2;
-
-  // Gender
   if (p.gender === Gender.Male) riskScore *= 1.3;
-
-  // Smoking
   if (p.smoker) riskScore *= 2.0;
 
-  // BMI
   if (bmi > 30) riskScore *= 1.5;
   else if (bmi > 25) riskScore *= 1.2;
 
-  // Conditions
   if (p.existingConditions.includes("Hypertension")) riskScore *= 1.5;
   if (p.existingConditions.includes("Type 2 Diabetes")) riskScore *= 2.0;
   if (p.existingConditions.includes("High Cholesterol")) riskScore *= 1.3;
 
-  // Activity
   if (p.activityLevel === ActivityLevel.Sedentary) riskScore *= 1.2;
 
-  // Cap at 99
   return Math.min(99, Number(riskScore.toFixed(1)));
 };
 
 // Health Score (0-100)
 const calculateHealthScore = (p: UserProfile, bmi: number, smoker: boolean) => {
   let score = 100;
-  
-  // Age decay
   score -= (p.age - 20) * 0.3; 
-
-  // BMI penalty
   if (bmi > 30) score -= 15;
   else if (bmi > 25) score -= 5;
-
-  // Smoker penalty
   if (smoker) score -= 20;
 
-  // Activity
   if (p.activityLevel === ActivityLevel.Sedentary) score -= 10;
   else if (p.activityLevel === ActivityLevel.Active) score += 5;
 
-  // Conditions
   score -= (p.existingConditions.length * 10);
 
-  // Sleep
   if (p.sleepHours < 6) score -= 5;
 
   return Math.max(10, Math.min(100, Math.round(score)));
+};
+
+
+// --- NEW DETERMINISTIC CALCULATIONS (A1-A6) ---
+
+const calcStepsCategory = (steps: number) => {
+  if (steps < 5000) return "sedentary_lifestyle_index";
+  if (steps < 7500) return "low_active";
+  if (steps < 10000) return "somewhat_active";
+  if (steps < 12500) return "active";
+  return "highly_active";
+};
+
+const calcActivityGuidelines = (steps: number) => {
+  const mvpaProxy = Math.round((steps / 100) * 7); // 100 steps approx 1 min MVPA assumption
+  const meetsBySteps = steps >= 8000;
+  const meetsByProxy = mvpaProxy >= 150;
+  return {
+    dailySteps: steps,
+    mvpaMinutesProxyPerWeek: mvpaProxy,
+    meetsGuidelineBySteps: meetsBySteps,
+    meetsGuidelineByProxyMinutes: meetsByProxy,
+    overallMeetsMinimumGuideline: meetsBySteps || meetsByProxy,
+    additionalBenefitsTierReached: mvpaProxy >= 300 || steps >= 11000
+  };
+};
+
+const calcSedentaryRisk = (hours: number) => {
+  if (hours < 6) return "low";
+  if (hours < 8) return "moderate";
+  if (hours < 10) return "high";
+  return "very_high";
+};
+
+const calcAlcoholRisk = (drinksPerWeek: number, sex: string, maxDrinks?: number) => {
+  const isMale = sex === Gender.Male;
+  const heavyThreshold = isMale ? 15 : 8;
+  const heavyDrinkingFlag = drinksPerWeek >= heavyThreshold;
+  
+  let riskLevel = "none";
+  if (drinksPerWeek > 0) riskLevel = heavyDrinkingFlag ? "high" : "elevated";
+
+  // Binge logic
+  let bingeFlag = false;
+  if (maxDrinks !== undefined) {
+    const bingeThreshold = isMale ? 5 : 4;
+    bingeFlag = maxDrinks >= bingeThreshold;
+  }
+
+  // Elevate if binge
+  if (bingeFlag && riskLevel !== "high") riskLevel = "high";
+
+  return { heavyDrinkingFlag, riskLevel, bingeFlag };
+};
+
+const calcSmokingRisk = (p: UserProfile) => {
+  if (!p.smoker) {
+    return {
+      riskLevel: "low",
+      packYears: 0,
+      lungCancerScreeningEligible: (p.age >= 50 && p.age <= 80 && (p.yearsSinceQuit || 0) <= 15 && (p.yearsSmoked || 0) * ((p.cigarettesPerDay || 0)/20) >= 20)
+    };
+  }
+
+  const packsPerDay = (p.cigarettesPerDay || 0) / 20;
+  const packYears = Number((packsPerDay * (p.yearsSmoked || 0)).toFixed(1));
+  
+  let riskLevel = "moderate";
+  if (packYears >= 20) riskLevel = "high";
+
+  const eligible = p.age >= 50 && p.age <= 80 && packYears >= 20;
+  
+  return { riskLevel, packYears, lungCancerScreeningEligible: eligible };
+};
+
+const calcDietScore = (quality: DietQuality, fastFood: FastFoodFrequency) => {
+  // Map Inputs to 1-5 Scale roughly
+  let qVal = 3;
+  if (quality === DietQuality.Poor) qVal = 1;
+  if (quality === DietQuality.Average) qVal = 3;
+  if (quality === DietQuality.Good) qVal = 5;
+
+  let ffVal = 3;
+  if (fastFood === FastFoodFrequency.Never) ffVal = 1;
+  if (fastFood === FastFoodFrequency.Rarely) ffVal = 2;
+  if (fastFood === FastFoodFrequency.Weekly) ffVal = 3;
+  if (fastFood === FastFoodFrequency.Frequent) ffVal = 5;
+
+  // Formula: baseFromDietQuality - fastFoodPenalty
+  // base: 1->20, 2->40, 3->60, 4->80, 5->100
+  const base = qVal * 20;
+  
+  // penalty: 1->0, 2->5, 3->15, 4->25, 5->35
+  const penalties = [0, 0, 5, 15, 25, 35];
+  const penalty = penalties[ffVal];
+
+  const score = Math.max(0, Math.min(100, base - penalty));
+  
+  let level = "very_high";
+  if (score >= 80) level = "low";
+  else if (score >= 60) level = "moderate";
+  else if (score >= 40) level = "high";
+
+  return { score, level, qVal, ffVal };
 };
 
 
@@ -126,22 +205,21 @@ COMMUNICATION & TRANSPARENCY RULES (STRICT):
 4. Do NOT increase numeric precision (e.g., if input is 12%, do not output 12.34%).
 5. THIS IS NOT A DIAGNOSIS. Always imply these are statistical estimates based on averages.
 
-STYLE & TONE:
-- Friendly, respectful, and non-judgmental.
-- Avoid fear-mongering. Explain risk calmly.
-- Suggestions should be practical (e.g., "Aim for 150 mins/week of moderate activity", "Reduce processed foods").
-
 **Output Structure (JSON):**
-Return a JSON object strictly matching this schema:
+Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCULATED risk cards into your output.
+
 {
   "riskCards": [
     {
-      "title": "Title (e.g. TYPE 2 DIABETES RISK)",
+      "id": "string (e.g. 'diabetes', 'physical_activity')",
+      "title": "Title",
       "organ": "Organ Name",
-      "probability": <NUMBER: Use the Provided Probability % in the prompt>,
+      "riskLevel": "low|moderate|high|very_high", 
+      "probability": <NUMBER: Use provided probability or map riskLevel to 5/30/60/90>,
       "probabilityLabel": "Low/Moderate/High",
       "summary": "Plain language explanation of the score.",
       "facts": ["Fact 1", "Fact 2"],
+      "recommendedActions": ["Action 1", "Action 2"],
       "sources": [{"title": "Source Name", "url": "URL"}]
     }
   ],
@@ -159,8 +237,17 @@ Return a JSON object strictly matching this schema:
   ],
   "weightTrajectory": [
     {"age": 30, "weight": 75}
-  ]
+  ],
+  "additionalMetrics": <Include the provided additionalMetrics object exactly>,
+  "debugCalculations": <Include the provided debugCalculations object exactly>
 }
+
+**MANDATORY SOURCE MAPPINGS (Do not deviate):**
+- Physical Activity: "WHO physical activity recommendations" (https://www.who.int/initiatives/behealthy/physical-activity)
+- Steps/Sedentary: "Tudor-Locke et al. Pedometer Indices" (https://pubmed.ncbi.nlm.nih.gov/14715035/)
+- Alcohol: "WHO Europe: No safe level" (https://www.who.int/europe/news/item/04-01-2023-no-level-of-alcohol-consumption-is-safe-for-our-health)
+- Smoking: "CDC Benefits of Quitting" (https://www.cdc.gov/tobacco/about/benefits-of-quitting.html)
+- Diet: "WHO Healthy Diet" (https://www.who.int/news-room/fact-sheets/detail/healthy-diet)
 `;
 
 export const generateHealthProjection = async (profile: UserProfile): Promise<SimulationResponse> => {
@@ -174,38 +261,86 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
     const cvdRiskPercent = calculateCVDRiskProxy(profile, bmi);
     const currentHealthScore = calculateHealthScore(profile, bmi, profile.smoker);
 
+    // --- New Deterministic Logic ---
+    const stepsCat = calcStepsCategory(profile.dailySteps);
+    const activityInfo = calcActivityGuidelines(profile.dailySteps);
+    const sedentaryRisk = calcSedentaryRisk(profile.sittingHours);
+    const alcoholInfo = calcAlcoholRisk(profile.alcoholDrinksPerWeek, profile.gender, profile.maxDrinksPerOccasion);
+    const smokingInfo = calcSmokingRisk(profile);
+    const dietInfo = calcDietScore(profile.dietQuality, profile.fastFoodFrequency);
+
     // FINDRISC Probability Mapping
-    // 0-6: 1%, 7-11: 4%, 12-14: 17%, 15-20: 33%, >20: 50%
     let diabetesProb = 1;
     if (findriscScore >= 7 && findriscScore <= 11) diabetesProb = 4;
     else if (findriscScore >= 12 && findriscScore <= 14) diabetesProb = 17;
     else if (findriscScore >= 15 && findriscScore <= 20) diabetesProb = 33;
     else if (findriscScore > 20) diabetesProb = 50;
 
+    const additionalMetrics = {
+        physicalActivity: {
+            ...activityInfo,
+            stepsCategory: stepsCat,
+            guidelineTargets: { minimumModerateMinutesPerWeek:150, additionalModerateMinutesPerWeek:300, muscleStrengthDaysPerWeek:2 }
+        },
+        sedentary: {
+            sittingHours: profile.sittingHours,
+            riskLevel: sedentaryRisk
+        },
+        alcohol: {
+            weeklyDrinks: profile.alcoholDrinksPerWeek,
+            ...alcoholInfo
+        },
+        smoking: {
+            ...smokingInfo,
+            cigarettesPerDay: profile.cigarettesPerDay,
+            yearsSmoked: profile.yearsSmoked
+        },
+        diet: {
+            score: dietInfo.score,
+            level: dietInfo.level
+        }
+    };
+
+    const debugCalculations = {
+        stepsCategory: { inputs: profile.dailySteps, result: stepsCat },
+        sedentary: { inputs: profile.sittingHours, result: sedentaryRisk },
+        diet: { inputs: {q: dietInfo.qVal, ff: dietInfo.ffVal}, formula: "base - penalty", result: dietInfo.score }
+    };
+
     const prompt = `
       Analyze this profile using the PROVIDED CALCULATED METRICS. 
-      Do NOT recalculate. Interpret these numbers strictly.
       
       User Profile:
-      - Age: ${profile.age}
-      - Sex: ${profile.gender}
-      - BMI: ${bmi}
-      - Waist-to-Hip Ratio: ${whr}
-      - Habits: ${profile.smoker ? "Smoker" : "Non-smoker"}, ${profile.activityLevel}
+      - Age: ${profile.age}, Sex: ${profile.gender}
+      - BMI: ${bmi}, WHR: ${whr}
+      - Daily Steps: ${profile.dailySteps}
+      - Sitting: ${profile.sittingHours} hrs/day
+      - Alcohol: ${profile.alcoholDrinksPerWeek} drinks/wk (Max per occasion: ${profile.maxDrinksPerOccasion})
+      - Smoker: ${profile.smoker} (Years: ${profile.yearsSmoked}, Cigs/day: ${profile.cigarettesPerDay})
+      - Years Since Quit: ${profile.yearsSinceQuit}
       
-      **APP CALCULATED METRICS (Use these values):**
-      1. FINDRISC Score (Diabetes): ${findriscScore}/26 (Approx probability: ${diabetesProb}%)
-      2. CVD Risk Proxy (10-Year): ${cvdRiskPercent}%
-      3. Current Bio-Vitality Score: ${currentHealthScore}/100
+      **APP CALCULATED METRICS (Must use these):**
+      1. FINDRISC (Diabetes): ${findriscScore}/26 (${diabetesProb}%)
+      2. CVD Risk Proxy: ${cvdRiskPercent}%
+      3. Bio-Vitality Score: ${currentHealthScore}/100
       
-      Instructions:
-      - Generate a JSON response matching the schema.
-      - Map "FINDRISC" to a "Type 2 Diabetes" Risk Card.
-      - Map "CVD Risk" to a "Cardiovascular" Risk Card.
-      - Project the 'healthScoreFuture' (10 years from now) and 'trajectory' based on the decay implied by smoking/inactivity if present.
-      - Project 'weightTrajectory' based on current BMI trends.
+      **DETERMINISTIC RISK DATA (Insert these as Risk Cards):**
+      - Physical Activity Risk: ${activityInfo.overallMeetsMinimumGuideline ? "Low" : "High"} (Steps Category: ${stepsCat})
+      - Sedentary Risk: ${sedentaryRisk}
+      - Alcohol Risk: ${alcoholInfo.riskLevel} (Binge Flag: ${alcoholInfo.bingeFlag})
+      - Smoking Risk: ${smokingInfo.riskLevel} (Pack Years: ${smokingInfo.packYears})
+      - Diet Quality Score: ${dietInfo.score}/100 (Level: ${dietInfo.level})
+
+      **Instructions:**
+      - Generate a JSON response.
+      - Create standard cards for Diabetes and CVD using the probabilities above.
+      - CREATE SPECIFIC CARDS for: "Physical Activity", "Sedentary Behavior", "Alcohol Use", "Tobacco Exposure", and "Diet Quality".
+      - For these specific cards, use the 'Risk Level' calculated above.
+      - Use the MANDATORY SOURCE MAPPINGS provided in system instructions for these cards.
+      - Include 'additionalMetrics' and 'debugCalculations' objects provided below exactly as is.
       
-      Return ONLY the JSON object.
+      additionalMetrics: ${JSON.stringify(additionalMetrics)}
+      debugCalculations: ${JSON.stringify(debugCalculations)}
     `;
 
     const response = await ai.models.generateContent({

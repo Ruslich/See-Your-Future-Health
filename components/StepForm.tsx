@@ -22,7 +22,12 @@ const INITIAL_DATA: UserProfile = {
   activityLevel: ActivityLevel.Moderate,
   smoker: false,
   cigarettesPerDay: 0,
+  yearsSmoked: 0,
+  yearsSinceQuit: 0,
+  
   alcoholDrinksPerWeek: 2,
+  maxDrinksPerOccasion: 1,
+
   dietQuality: DietQuality.Average,
   fastFoodFrequency: FastFoodFrequency.Weekly
 };
@@ -258,7 +263,7 @@ const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
                 </div>
               </div>
               
-              {/* Fast Food Question - NEW */}
+              {/* Fast Food Question */}
               <div>
                  <div className="flex items-center gap-2 mb-2">
                    <Utensils size={16} className="text-amber-500" />
@@ -282,36 +287,57 @@ const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
               </div>
 
                {/* Smoking */}
-               <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <div className="flex items-center gap-2 mb-2">
-                       <Cigarette size={16} className="text-slate-500" />
-                       <label className="block text-xs md:text-sm font-bold text-slate-500 uppercase tracking-wide">Smoke?</label>
-                    </div>
-                    <div className="flex bg-white/40 rounded-xl p-1 border border-white/40">
-                      <button 
-                        onClick={() => updateField('smoker', false)}
-                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${!data.smoker ? 'bg-white shadow-sm text-teal-700' : 'text-slate-400 hover:text-slate-600'}`}
-                      >
-                        No
-                      </button>
-                      <button 
-                        onClick={() => updateField('smoker', true)}
-                        className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${data.smoker ? 'bg-white shadow-sm text-red-600' : 'text-slate-400 hover:text-slate-600'}`}
-                      >
-                        Yes
-                      </button>
-                    </div>
+               <div className="bg-white/40 p-4 rounded-xl border border-white/40">
+                 <div className="flex items-center gap-2 mb-3">
+                    <Cigarette size={16} className="text-slate-500" />
+                    <label className="block text-xs md:text-sm font-bold text-slate-500 uppercase tracking-wide">Tobacco History</label>
                  </div>
-                 {data.smoker && (
+                 <div className="flex gap-2 mb-4">
+                   <button 
+                     onClick={() => updateField('smoker', false)}
+                     className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${!data.smoker ? 'bg-white shadow-sm text-teal-700' : 'bg-slate-100 text-slate-400 hover:text-slate-600'}`}
+                   >
+                     Non-Smoker
+                   </button>
+                   <button 
+                     onClick={() => updateField('smoker', true)}
+                     className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${data.smoker ? 'bg-white shadow-sm text-red-600' : 'bg-slate-100 text-slate-400 hover:text-slate-600'}`}
+                   >
+                     Smoker
+                   </button>
+                 </div>
+
+                 {data.smoker ? (
+                   <div className="grid grid-cols-2 gap-4 fade-in">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Cigs / Day</label>
+                        <input 
+                          type="number" 
+                          value={data.cigarettesPerDay || ''}
+                          onChange={(e) => updateField('cigarettesPerDay', parseInt(e.target.value) || 0)}
+                          className="w-full p-2 bg-white border border-slate-200 rounded-lg outline-none font-bold text-center"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Years Smoked</label>
+                        <input 
+                          type="number" 
+                          value={data.yearsSmoked || ''}
+                          onChange={(e) => updateField('yearsSmoked', parseInt(e.target.value) || 0)}
+                          className="w-full p-2 bg-white border border-slate-200 rounded-lg outline-none font-bold text-center"
+                        />
+                      </div>
+                   </div>
+                 ) : (
                    <div className="fade-in">
-                      <label className="block text-xs md:text-sm font-bold text-slate-500 mb-2 uppercase tracking-wide">Cigs/Day</label>
-                      <input 
-                        type="number" 
-                        value={data.cigarettesPerDay || ''}
-                        onChange={(e) => updateField('cigarettesPerDay', parseInt(e.target.value) || 0)}
-                        className="w-full p-2.5 bg-white/60 border border-slate-200 rounded-xl outline-none font-bold text-center"
-                      />
+                       <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Years since quitting (if ex-smoker)</label>
+                       <input 
+                          type="number" 
+                          placeholder="0 if never smoked"
+                          value={data.yearsSinceQuit || ''}
+                          onChange={(e) => updateField('yearsSinceQuit', parseInt(e.target.value) || 0)}
+                          className="w-full p-2 bg-white border border-slate-200 rounded-lg outline-none font-bold text-slate-700"
+                        />
                    </div>
                  )}
                </div>
@@ -320,17 +346,35 @@ const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
                <div>
                 <div className="flex items-center gap-2 mb-2">
                    <Beer size={16} className="text-orange-400" />
-                   <label className="block text-xs md:text-sm font-bold text-slate-500 uppercase tracking-wide">Alcohol (Drinks/Week)</label>
+                   <label className="block text-xs md:text-sm font-bold text-slate-500 uppercase tracking-wide">Alcohol Consumption</label>
                 </div>
-                <div className="bg-white/40 p-4 rounded-xl border border-white/40 flex items-center gap-4">
-                  <input 
-                    type="range" 
-                    min="0" max="25" 
-                    value={data.alcoholDrinksPerWeek}
-                    onChange={(e) => updateField('alcoholDrinksPerWeek', parseInt(e.target.value))}
-                    className="flex-1 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-teal-600 mix-blend-multiply"
-                  />
-                  <div className="w-16 text-right font-bold text-teal-800 text-lg">{data.alcoholDrinksPerWeek}</div>
+                <div className="bg-white/40 p-4 rounded-xl border border-white/40 space-y-4">
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase">Drinks Per Week</span>
+                      <span className="text-sm font-bold text-teal-800">{data.alcoholDrinksPerWeek}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="0" max="30" 
+                      value={data.alcoholDrinksPerWeek}
+                      onChange={(e) => updateField('alcoholDrinksPerWeek', parseInt(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-teal-600 mix-blend-multiply"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex justify-between mb-1">
+                       <span className="text-[10px] font-bold text-slate-500 uppercase">Max Drinks in One Occasion</span>
+                       <span className="text-sm font-bold text-indigo-800">{data.maxDrinksPerOccasion || 1}</span>
+                    </div>
+                    <input 
+                      type="range" 
+                      min="1" max="15" 
+                      value={data.maxDrinksPerOccasion || 1}
+                      onChange={(e) => updateField('maxDrinksPerOccasion', parseInt(e.target.value))}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500 mix-blend-multiply"
+                    />
+                  </div>
                 </div>
               </div>
              </div>
@@ -364,7 +408,6 @@ const StepForm: React.FC<StepFormProps> = ({ onComplete }) => {
                   <button
                     key={condition}
                     onClick={() => {
-                       // If selecting a condition, ensure "None" is cleared (though effectively handled by logic, visually distinct)
                        if(data.existingConditions.length === 0) updateField('existingConditions', []);
                        toggleCondition(condition);
                     }}

@@ -29,19 +29,26 @@ export interface UserProfile {
   gender: Gender;
   heightCm: number;
   weightKg: number;
-  waistCm: number; // New
-  hipCm: number;   // New
+  waistCm: number;
+  hipCm: number;
   
-  // New detailed metrics
+  // Detailed metrics
   dailySteps: number;
   sittingHours: number;
   existingConditions: string[];
   
   sleepHours: number;
   activityLevel: ActivityLevel;
+  
+  // Habits
   smoker: boolean;
   cigarettesPerDay?: number;
+  yearsSmoked?: number;      // New
+  yearsSinceQuit?: number;   // New
+  
   alcoholDrinksPerWeek: number;
+  maxDrinksPerOccasion?: number; // New (for binge flag)
+  
   dietQuality: DietQuality;
   fastFoodFrequency: FastFoodFrequency;
 }
@@ -52,28 +59,31 @@ export interface SourceLink {
 }
 
 export interface RiskCard {
+  id?: string; // New
   title: string;
-  organ: string;
-  probability: number; // 0-100
-  probabilityLabel: string; // e.g., "High Risk", "Below Average"
-  summary: string; // The "Shiny sentence"
-  facts: string[]; // Bullet points
+  organ?: string; // Optional now as some cards are systemic
+  riskLevel?: string; // New
+  probability: number; // 0-100 (Legacy support)
+  probabilityLabel: string; 
+  summary: string;
+  facts?: string[];
+  recommendedActions?: string[]; // New
   sources: SourceLink[];
 }
 
 export interface TrajectoryPoint {
   age: number;
-  score: number; // 0-100 Health Score
+  score: number;
 }
 
 export interface WeightPoint {
   age: number;
-  weight: number; // in kg
+  weight: number;
 }
 
 export interface DiseasePrediction {
   condition: string;
-  onsetAge: number; // e.g. 58
+  onsetAge: number;
 }
 
 export interface SimulationResponse {
@@ -81,20 +91,24 @@ export interface SimulationResponse {
   suggestedAction: string;
   healthScoreCurrent: number;
   healthScoreFuture: number;
-  lifeExpectancy: number; // New: e.g. 78
+  lifeExpectancy: number;
   predictedConditions: DiseasePrediction[];
-  organHighlights: string[]; // e.g., ['liver', 'heart']
-  trajectory: TrajectoryPoint[]; // Health Score
-  bmiTrajectory?: TrajectoryPoint[]; // BMI over time
-  weightTrajectory: WeightPoint[]; // New: Weight over time
+  organHighlights: string[];
+  trajectory: TrajectoryPoint[];
+  bmiTrajectory?: TrajectoryPoint[];
+  weightTrajectory: WeightPoint[];
+  
+  // New deterministic sections
+  additionalMetrics?: any;
+  debugCalculations?: any;
 }
 
 export type StepField = 
   | 'basic'
   | 'body'
-  | 'activity' // Steps & Sitting
-  | 'habits' // Sleep, Smoke, Alcohol, Fast Food
-  | 'medical' // Conditions
+  | 'activity' 
+  | 'habits' 
+  | 'medical' 
   | 'diet';
 
 export const STEPS: StepField[] = ['basic', 'body', 'activity', 'habits', 'medical', 'diet'];

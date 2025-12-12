@@ -192,6 +192,26 @@ const calcDietScore = (quality: DietQuality, fastFood: FastFoodFrequency) => {
 };
 
 
+// --- Helper to extract full text and avoid truncation ---
+function getFullText(resp: any): string {
+  if (!resp) return "";
+
+  // Some SDKs expose a helper method
+  const direct =
+    typeof resp.text === "function" ? resp.text() :
+    typeof resp.text === "string" ? resp.text :
+    "";
+
+  // Tool / grounded responses are often split into parts
+  const partsText = (resp.candidates ?? [])
+    .flatMap((c: any) => c?.content?.parts ?? [])
+    .map((p: any) => (typeof p?.text === "string" ? p.text : ""))
+    .join("");
+
+  return (partsText || direct || "").trim();
+}
+
+
 const SYSTEM_INSTRUCTION = `
 You are "See Your Future Health", a health interpretation engine.
 
@@ -311,6 +331,11 @@ Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCU
     }
   ]
 }
+
+**TRAJECTORY DATA REQUIREMENTS (STRICT):**
+- trajectory MUST contain 6–11 points (yearly) from current age to +10 years.
+- weightTrajectory MUST contain the SAME number of points and matching ages.
+- Each weightTrajectory item must be: {"age": <number>, "weight": <number>} (kg).
 
 **SCENARIO RULES (Follow Strictly):**
 1. **status_quo**: No behavior changes. Reflect current trajectory.
@@ -443,7 +468,7 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
       }
     });
 
-    const text = response.text;
+    const text = getFullText(response); // Use helper instead of direct property access
     if (!text) throw new Error("No response from AI");
 
     function extractJson(text: string): string {
@@ -476,7 +501,7 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
 
     // ...
 
-    const rawText = response.text;
+    const rawText = text; // Already extracted
     if (!rawText) throw new Error("NO_TEXT_FROM_GEMINI");
 
     let parsed: any;
@@ -543,18 +568,122 @@ export const explainHealthInsight = async (
       User Question: "${question}"
       
       Provide a concise, scientific explanation (max 3 sentences). 
-      Use the phrase "Based on standard risk models..." instead of claiming to run simulations.
+      If you reference a guideline, cite one authoritative source (CDC, WHO, NIH, etc) if available.
+      Use the Google Search tool if needed to verify facts from allowed authoritative domains.
+      Allowed Domains: who.int, cdc.gov, nih.gov, ncbi.nlm.nih.gov, uspreventiveservicestaskforce.org, ahajournals.org, heart.org, thelancet.com, nejm.org, bmj.com, jamanetwork.com, nature.com, sciencedirect.com, cochranelibrary.com.
       Do not invent numbers.
     `;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
+      config: { 
+        tools: [{ googleSearch: {} }],
+        temperature: 0.2
+      }
     });
     
-    return response.text || "I couldn't generate an explanation at this time.";
+    const out = getFullText(response);
+    return out || "I couldn't generate an explanation at this time.";
+
   } catch (e) {
     console.error(e);
     return "Connection error. Please try again.";
+  }
+};
+
+const CHAT_SYSTEM_INSTRUCTION = `
+You are a specialized Health Assistant.
+Answer ONLY using the provided CONTEXT PACK + (optional) evidence from allowed domains.
+
+ALLOWED DOMAINS FOR WEB SEARCH (STRICT):
+who.int, cdc.gov, nih.gov, ncbi.nlm.nih.gov, uspreventiveservicestaskforce.org,
+heart.org, ahajournals.org, cochranelibrary.com, jamanetwork.com, nejm.org, bmj.com, thelancet.com
+
+EVIDENCE RULES:
+- You MAY use Google Search, but ONLY cite sources from the allowed domains above.
+- If you can’t find a trustworthy numeric estimate from allowed domains, DO NOT invent it.
+- Numeric claims MUST be in the EVIDENCE section and MUST end with [1], [2], etc.
+- In SOURCES, list only the cited sources (same indices).
+
+OUTPUT FORMAT (Plain Text Only, EXACT headings; NO markdown):
+
+DIRECT ANSWER: <1–2 sentences, finish the thought.>
+
+PERSONALIZED IMPACT
+• <3–6 bullets. Each bullet MUST include at least 1 of the user’s metrics (BMI, WHR, steps, sitting hours, alcohol/wk, smoker/pack-years, DietScore, Current/Future Health Score).>
+• <If user asks “what if I do X”, include how X would shift at least 2 of those metrics (conservatively).>
+
+EVIDENCE
+• <2–4 bullets. Each bullet: numeric estimate/range + what it means + MUST end with [n].>
+• <If no numeric estimate found in allowed domains, write: “No strong numeric estimate found in allowed sources.”>
+
+SOURCES:
+[1] <Title> — <URL>
+[2] <Title> — <URL>
+(Include 1–4 sources max; omit SOURCES entirely if none)
+
+HARD RULES:
+- No diagnosis.
+- Neutral tone (no shame).
+- Never output unfinished sentences.
+- Never invent studies, URLs, or numbers.
+`;
+
+export const chatWithHealthAssistant = async (
+  profile: UserProfile,
+  simulation: SimulationResponse,
+  question: string
+): Promise<string> => {
+  try {
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Extract key metrics
+    const bmi = calculateBMI(profile.heightCm, profile.weightKg);
+    const whr = calculateWHR(profile.waistCm, profile.hipCm);
+    
+    // Additional metrics context
+    const smoking = profile.smoker 
+      ? `Smoker (${profile.cigarettesPerDay}/day, ~${simulation.additionalMetrics?.smoking?.packYears || 0} pack-years)` 
+      : 'Non-smoker';
+    
+    const activity = `Steps: ${profile.dailySteps} (${simulation.additionalMetrics?.physicalActivity?.stepsCategory}), Sitting: ${profile.sittingHours}h/day, Sleep: ${profile.sleepHours}h`;
+    const alcohol = `Alcohol: ${profile.alcoholDrinksPerWeek} drinks/wk (Binge: ${simulation.additionalMetrics?.alcohol?.bingeFlag ? 'Yes' : 'No'})`;
+    const diet = simulation.additionalMetrics?.diet ? `DietScore: ${simulation.additionalMetrics.diet.score}/100` : '';
+
+    // Construct Context Pack
+    const contextPack = `
+      PROFILE: ${profile.age}y ${profile.gender}, BMI ${bmi}, WHR ${whr}
+      METRICS: ${activity}, ${smoking}, ${alcohol}, ${diet}
+      SCORES: Current ${simulation.healthScoreCurrent} -> Future ${simulation.healthScoreFuture}
+      RISKS:
+      ${simulation.riskCards.slice(0, 3).map(r => `- ${r.title} (${r.probability}%): ${r.riskLevel}`).join('\n')}
+    `;
+
+    // Construct Prompt
+    const prompt = `
+      CONTEXT PACK:
+      ${contextPack}
+      
+      USER QUESTION: "${question}"
+    `;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: { 
+        systemInstruction: CHAT_SYSTEM_INSTRUCTION,
+        tools: [{ googleSearch: {} }],
+        temperature: 0.2,
+        maxOutputTokens: 1400
+      }
+    });
+
+    const out = getFullText(response);
+    return out || "I couldn't generate a response at this time. Please try again.";
+
+  } catch (e) {
+    console.error("Chat Error:", e);
+    return "I'm having trouble connecting to the health model right now. Please check your connection and try again.";
   }
 };

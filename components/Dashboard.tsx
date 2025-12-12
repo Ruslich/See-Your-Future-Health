@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SimulationResponse, UserProfile, RiskCard, ActivityLevel, DietQuality, FastFoodFrequency, Gender, WeightPoint, ChartSpec, ScenarioItem } from '../types';
-import { generateHealthProjection, explainHealthInsight } from '../services/geminiService';
-import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight } from 'lucide-react';
+import { generateHealthProjection, explainHealthInsight, chatWithHealthAssistant } from '../services/geminiService';
+import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight, MessageSquare, Bot, User } from 'lucide-react';
 import BulletTargetCard from './BulletTargetCard';
 import StackedContributionCard from './StackedContributionCard';
 import MilestoneTimelineCard from './MilestoneTimelineCard';
@@ -85,7 +85,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
   
   const minAge = data[0].age;
   const maxAge = data[data.length - 1].age;
-  const ageRange = maxAge - minAge;
+  const ageRange = Math.max(1, maxAge - minAge);
 
   // Calculate Y Range
   const allValues = [
@@ -97,7 +97,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
   const valueBuffer = (maxValue - minValue) * 0.1 || 5;
   const yMin = Math.floor(minValue - valueBuffer);
   const yMax = Math.ceil(maxValue + valueBuffer);
-  const yRange = yMax - yMin;
+  const yRange = Math.max(1, yMax - yMin);
 
   const getCoord = (age: number, val: number) => {
     const x = ((age - minAge) / ageRange) * (width - padding.left - padding.right) + padding.left;
@@ -289,7 +289,7 @@ const ComparisonChart: React.FC<{
   
   const minAge = original[0].age;
   const maxAge = original[original.length - 1].age;
-  const ageRange = maxAge - minAge;
+  const ageRange = Math.max(1, maxAge - minAge);
 
   const getPoints = (data: { age: number; score: number }[]) => {
     return data.map((pt) => {
@@ -367,12 +367,12 @@ const WeightChart: React.FC<{
   
   const minAge = trajectory[0].age;
   const maxAge = trajectory[trajectory.length - 1].age;
-  const ageRange = maxAge - minAge;
+  const ageRange = Math.max(1, maxAge - minAge);
   
   const allWeights = [...trajectory.map(t => t.weight), ...(comparison ? comparison.map(c => c.weight) : [])];
   const minWeight = Math.min(...allWeights) - 5;
   const maxWeight = Math.max(...allWeights) + 5;
-  const weightRange = maxWeight - minWeight;
+  const weightRange = Math.max(1, maxWeight - minWeight);
 
   const getPoints = (data: { age: number; weight: number }[]) => {
     return data.map((pt) => {
@@ -496,7 +496,7 @@ const RiskCardComponent: React.FC<{
              {loadingChat ? (
                <div className="flex items-center gap-2 text-slate-400"><RefreshCw size={12} className="animate-spin" /> Analyzing models...</div>
              ) : (
-               <p className="leading-relaxed">{chatResponse}</p>
+               <p className="leading-relaxed whitespace-pre-wrap break-words">{chatResponse}</p>
              )}
           </div>
         )}
@@ -505,6 +505,185 @@ const RiskCardComponent: React.FC<{
   );
 };
 
+// --- Chat Panel Component ---
+
+const renderFormattedMessage = (text: string) => {
+  const lines = text.split('\n');
+  return (
+    <div className="space-y-2">
+      {lines.map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={i} className="h-2" />;
+
+        if (trimmed.startsWith('DIRECT ANSWER:')) {
+          return (
+            <div key={i} className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl mb-3">
+              <span className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider block mb-1">Direct Answer</span>
+              <p className="text-indigo-900 font-medium leading-relaxed">{trimmed.replace('DIRECT ANSWER:', '').trim()}</p>
+            </div>
+          );
+        }
+
+        if (trimmed.includes('PERSONALIZED IMPACT') || trimmed.includes('EVIDENCE') || trimmed.includes('SOURCES:')) {
+           let color = "bg-slate-100 text-slate-500";
+           if(trimmed.includes('IMPACT')) color = "bg-teal-100 text-teal-700";
+           if(trimmed.includes('EVIDENCE')) color = "bg-amber-100 text-amber-700";
+           
+           return (
+             <div key={i} className={`inline-block text-[10px] font-bold uppercase px-2 py-1 rounded-md mb-1 mt-2 ${color}`}>
+               {trimmed.replace(/:/g, '')}
+             </div>
+           );
+        }
+
+        if (trimmed.startsWith('•')) {
+          return (
+            <div key={i} className="flex items-start gap-2 pl-1 mb-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-slate-400 mt-1.5 shrink-0" />
+              <p className="text-slate-700 text-sm leading-relaxed">{trimmed.substring(1).trim()}</p>
+            </div>
+          );
+        }
+        
+        // Sources often look like "[1] Title..."
+        if (/^\[\d+\]/.test(trimmed)) {
+           return (
+             <div key={i} className="text-xs text-slate-500 pl-1 mb-0.5 border-l-2 border-slate-200 ml-1">
+               <span className="ml-2 block">{trimmed}</span>
+             </div>
+           )
+        }
+
+        return <p key={i} className="text-sm text-slate-700 leading-relaxed">{trimmed}</p>;
+      })}
+    </div>
+  );
+};
+
+
+interface ChatPanelProps {
+  userProfile: UserProfile;
+  simulationData: SimulationResponse;
+  onClose: () => void;
+}
+
+const ChatPanel: React.FC<ChatPanelProps> = ({ userProfile, simulationData, onClose }) => {
+  const [messages, setMessages] = useState<{role: 'user' | 'assistant', text: string}[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const suggestedQuestions = [
+    "What should I change first?",
+    "Why is my diabetes risk high?", 
+    "How confident is this?",
+  ];
+
+  const handleSend = async (text: string) => {
+    if (!text.trim()) return;
+    
+    const userMsg = { role: 'user' as const, text };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
+
+    const response = await chatWithHealthAssistant(userProfile, simulationData, text);
+    
+    setMessages(prev => [...prev, { role: 'assistant', text: response }]);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, loading]);
+
+  return (
+    <div className="h-full flex flex-col bg-white">
+       <div className="px-4 py-3 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+          <div className="flex items-center gap-2">
+             <Bot size={18} className="text-indigo-600" />
+             <div>
+                <h3 className="text-sm font-bold text-slate-800">Health Assistant</h3>
+                <p className="text-[10px] text-slate-500">Ask about your projection</p>
+             </div>
+          </div>
+          {messages.length > 0 && (
+             <button onClick={() => setMessages([])} className="text-[10px] text-slate-400 hover:text-slate-600">Clear</button>
+          )}
+       </div>
+
+       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50" ref={scrollRef}>
+          {messages.length === 0 && (
+             <div className="text-center py-8">
+                <div className="w-12 h-12 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                   <MessageSquare size={20} />
+                </div>
+                <h4 className="text-sm font-bold text-slate-700 mb-1">Have questions?</h4>
+                <p className="text-xs text-slate-500 px-4 mb-6">I can explain your risks, scenarios, and health score in more detail.</p>
+                <div className="flex flex-col gap-2 px-4">
+                   {suggestedQuestions.map((q, i) => (
+                      <button 
+                        key={i} 
+                        onClick={() => handleSend(q)}
+                        className="text-xs text-left bg-white border border-slate-200 p-3 rounded-xl hover:border-indigo-300 hover:text-indigo-700 transition-colors shadow-sm"
+                      >
+                        {q}
+                      </button>
+                   ))}
+                </div>
+             </div>
+          )}
+
+          {messages.map((m, i) => (
+             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[90%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                   m.role === 'user' 
+                   ? 'bg-slate-800 text-white rounded-tr-none' 
+                   : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none shadow-sm'
+                }`}>
+                   {m.role === 'user' ? m.text : renderFormattedMessage(m.text)}
+                </div>
+             </div>
+          ))}
+
+          {loading && (
+             <div className="flex justify-start">
+                <div className="bg-white border border-slate-200 px-4 py-3 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
+                   <RefreshCw size={12} className="animate-spin text-indigo-500" />
+                   <span className="text-xs text-slate-400">Thinking...</span>
+                </div>
+             </div>
+          )}
+       </div>
+
+       <div className="p-4 bg-white border-t border-slate-200">
+          <form 
+            onSubmit={(e) => { e.preventDefault(); handleSend(input); }}
+            className="flex gap-2"
+          >
+             <input 
+               type="text" 
+               value={input}
+               onChange={(e) => setInput(e.target.value)}
+               placeholder="Ask anything..."
+               className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
+             />
+             <button 
+               type="submit" 
+               disabled={!input.trim() || loading}
+               className="bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+             >
+                <Send size={18} />
+             </button>
+          </form>
+       </div>
+    </div>
+  );
+};
+
+
 // --- Main Dashboard ---
 const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => {
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
@@ -512,6 +691,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
   const [isSimulating, setIsSimulating] = useState(false);
   const [expandedChart, setExpandedChart] = useState<'health' | 'weight' | null>(null);
   
+  // Right Panel State (3D Model vs Chat)
+  const [rightPanelMode, setRightPanelMode] = useState<'3d' | 'chat'>('3d');
+
   // Scenario & Simulation State
   const [activeScenarios, setActiveScenarios] = useState<Record<string, Partial<UserProfile>>>({});
   const [selectedScenarioId, setSelectedScenarioId] = useState<"status_quo" | "small_changes" | "big_changes">("status_quo");
@@ -872,20 +1054,52 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
         </div>
       </div>
 
-      {/* Right Panel: 3D Model */}
-      <div className="w-full lg:w-[40%] h-[35vh] lg:h-full bg-slate-900 relative border-t lg:border-t-0 lg:border-l border-slate-200 shadow-2xl overflow-hidden">
-        <div className="absolute top-6 left-6 z-10 flex flex-col gap-2">
-           <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-lg text-[10px] font-semibold text-white/90 flex items-center gap-1.5">
-              <Activity size={12} className="text-teal-400"/> Interactive 3D Model
-           </div>
-           <div className={`transition-all duration-500 transform ${currentOrgan ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0'}`}>
-              <div className="bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl max-w-[200px]">
-                <div className="text-[9px] text-teal-200 uppercase font-bold mb-1 flex items-center gap-1"><Search size={10} /> Active Focus</div>
-                <div className="text-lg font-bold text-white capitalize">{currentOrgan}</div>
-              </div>
-           </div>
+      {/* Right Panel: 3D Model OR Chat */}
+      <div className="w-full lg:w-[40%] h-[35vh] lg:h-full bg-slate-900 relative border-t lg:border-t-0 lg:border-l border-slate-200 shadow-2xl overflow-hidden flex flex-col">
+        {/* Toggle Header */}
+        <div className="absolute top-4 right-4 z-20 bg-black/60 backdrop-blur-md rounded-xl p-1 flex gap-1 border border-white/10 shadow-lg">
+           <button 
+             onClick={() => setRightPanelMode('3d')}
+             className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1.5 ${
+               rightPanelMode === '3d' ? 'bg-teal-500 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-white/10'
+             }`}
+           >
+              <Activity size={12} /> 3D Body
+           </button>
+           <button 
+             onClick={() => setRightPanelMode('chat')}
+             className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center gap-1.5 ${
+               rightPanelMode === 'chat' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-300 hover:text-white hover:bg-white/10'
+             }`}
+           >
+              <MessageSquare size={12} /> AI Assistant
+           </button>
         </div>
-        <iframe src="https://www.zygotebody.com" className="w-full h-full border-0 opacity-80 hover:opacity-100 transition-opacity duration-700" title="Zygote Body" allow="autoplay; encrypted-media" />
+
+        {rightPanelMode === '3d' ? (
+          <>
+            <div className="absolute top-6 left-6 z-10 flex flex-col gap-2 pointer-events-none">
+              <div className="bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-lg text-[10px] font-semibold text-white/90 flex items-center gap-1.5">
+                  <Activity size={12} className="text-teal-400"/> Interactive 3D Model
+              </div>
+              <div className={`transition-all duration-500 transform ${currentOrgan ? 'translate-x-0 opacity-100' : '-translate-x-10 opacity-0'}`}>
+                  <div className="bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl max-w-[200px]">
+                    <div className="text-[9px] text-teal-200 uppercase font-bold mb-1 flex items-center gap-1"><Search size={10} /> Active Focus</div>
+                    <div className="text-lg font-bold text-white capitalize">{currentOrgan}</div>
+                  </div>
+              </div>
+            </div>
+            <iframe src="https://www.zygotebody.com" className="w-full h-full border-0 opacity-80 hover:opacity-100 transition-opacity duration-700" title="Zygote Body" allow="autoplay; encrypted-media" />
+          </>
+        ) : (
+          <div className="w-full h-full pt-16 bg-slate-50">
+             <ChatPanel 
+               userProfile={userProfile} 
+               simulationData={activeData} 
+               onClose={() => setRightPanelMode('3d')}
+             />
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { SimulationResponse, UserProfile, RiskCard, ActivityLevel, DietQuality, FastFoodFrequency, Gender, WeightPoint, ChartSpec, ScenarioItem } from '../types';
+import { SimulationResponse, UserProfile, RiskCard, ActivityLevel, DietQuality, FastFoodFrequency, Gender, WeightPoint, ChartSpec, ScenarioItem, Le8ComponentScore } from '../types';
 import { generateHealthProjection, explainHealthInsight, chatWithHealthAssistant } from '../services/geminiService';
-import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight, MessageSquare, Bot, User } from 'lucide-react';
+import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight, MessageSquare, Bot, User, CheckCircle2 } from 'lucide-react';
 import BulletTargetCard from './BulletTargetCard';
 import StackedContributionCard from './StackedContributionCard';
 import MilestoneTimelineCard from './MilestoneTimelineCard';
@@ -41,16 +41,16 @@ const getTrendInterpretation = (type: 'weight' | 'health', profile: UserProfile)
     if (isActive && badDiet) return "While you are active, your dietary choices may still contribute to gradual weight gain, albeit slower than if you were sedentary.";
     return "Your projected weight trend tracks closely with the population average for your age group, assuming current habits persist.";
   } else {
-    // Health Score
+    // Health Score (LE8)
     const smoker = profile.smoker;
     const isSedentary = profile.activityLevel === ActivityLevel.Sedentary;
     const poorSleep = profile.sleepHours < 6;
     
-    if (smoker) return "Smoking is a major accelerator of biological aging, causing a steeper decline in health score compared to non-smokers.";
+    if (smoker) return "Smoking strongly lowers cardiovascular health and the LE8 score due to direct vascular damage, accelerating score decline.";
     if (isSedentary) return "Sedentary lifestyle is a key risk factor. Without regular movement, metabolic and cardiovascular health scores decline faster than average.";
-    if (poorSleep) return "Chronic sleep deprivation accelerates cellular aging, contributing to a faster decline in your vitality score.";
-    if (profile.activityLevel === ActivityLevel.Active) return "Your high activity level acts as a protective buffer, maintaining a higher health score for longer than the average trajectory.";
-    return "Your health score follows a standard trajectory. Small improvements in diet or sleep could flatten the curve.";
+    if (poorSleep) return "Chronic sleep deprivation impacts metabolic regulation, contributing to a faster decline in your LE8 score.";
+    if (profile.activityLevel === ActivityLevel.Active) return "Your high activity level acts as a protective buffer, maintaining a higher LE8 score for longer than the average trajectory.";
+    return "Your LE8 score follows a standard trajectory. Small improvements in diet or sleep could flatten the curve and preserve cardiovascular health.";
   }
 };
 
@@ -143,7 +143,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
           <div>
             <h2 className="text-2xl font-black text-slate-800 flex items-center gap-2 uppercase tracking-tight">
                <TrendingUp className="text-teal-600" />
-               {type === 'health' ? 'Health Score Trajectory' : 'Weight Projection'}
+               {type === 'health' ? 'AHA LE8 Score Trajectory' : 'Weight Projection'}
             </h2>
              <p className="text-sm text-slate-500 font-medium">Detailed year-by-year analysis based on your profile.</p>
           </div>
@@ -302,7 +302,7 @@ const ComparisonChart: React.FC<{
   return (
     <div className="w-full bg-white rounded-xl p-4 border border-slate-100 mt-4 relative overflow-hidden shadow-sm group">
       <div className="flex justify-between items-center mb-4">
-        <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Health Score Trajectory (Age {minAge}-{maxAge})</h4>
+        <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">AHA LE8 Score Trajectory (Age {minAge}-{maxAge})</h4>
         <div className="flex items-center gap-2">
              <button onClick={onExpand} className="text-slate-300 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100">
                 <Maximize2 size={14} />
@@ -505,6 +505,67 @@ const RiskCardComponent: React.FC<{
   );
 };
 
+// --- LE8 Component Breakdown ---
+const Le8Breakdown: React.FC<{ components: Le8ComponentScore[] }> = ({ components }) => {
+  if (!components || components.length === 0) return null;
+  
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 mt-4">
+       <div className="flex items-center gap-2 mb-3">
+          <Heart size={14} className="text-rose-500" />
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Life's Essential 8™ Breakdown</h2>
+       </div>
+       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {components.map((c) => {
+             // Score color logic
+             let colorClass = "text-emerald-600 bg-emerald-50 border-emerald-100";
+             let barClass = "bg-emerald-500";
+             
+             if (c.score < 50) {
+               colorClass = "text-red-600 bg-red-50 border-red-100";
+               barClass = "bg-red-500";
+             } else if (c.score < 80) {
+               colorClass = "text-amber-600 bg-amber-50 border-amber-100";
+               barClass = "bg-amber-500";
+             }
+             
+             return (
+               <div key={c.id} className="relative p-3 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-white transition-all group">
+                  <div className="flex justify-between items-start mb-1">
+                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">{c.label}</span>
+                     <span className={`text-xs font-black ${colorClass.split(' ')[0]}`}>{c.score}</span>
+                  </div>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden mb-2">
+                     <div className={`h-full ${barClass}`} style={{ width: `${c.score}%` }} />
+                  </div>
+                  
+                  <div className="flex justify-between items-center">
+                    <span className="text-[9px] text-slate-400 font-medium truncate max-w-[70%]">{c.valueLabel || c.basis}</span>
+                    {c.basis === 'proxy' || c.basis === 'unknown' ? (
+                       <span className="text-[8px] px-1 py-0.5 rounded bg-slate-200 text-slate-500 font-bold uppercase">Est.</span>
+                    ) : (
+                       <CheckCircle2 size={10} className="text-emerald-400" />
+                    )}
+                  </div>
+                  
+                  {/* Tooltip for basis */}
+                  {c.note && (
+                    <div className="absolute bottom-full left-0 mb-2 w-48 bg-slate-800 text-white text-[10px] p-2 rounded shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none z-20">
+                       <p className="font-bold mb-0.5">{c.label}</p>
+                       {c.note}
+                    </div>
+                  )}
+               </div>
+             )
+          })}
+       </div>
+    </div>
+  )
+}
+
+
 // --- Chat Panel Component ---
 
 const renderFormattedMessage = (text: string) => {
@@ -606,7 +667,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ userProfile, simulationData, onCl
              <Bot size={18} className="text-indigo-600" />
              <div>
                 <h3 className="text-sm font-bold text-slate-800">Health Assistant</h3>
-                <p className="text-[10px] text-slate-500">Ask about your projection</p>
+                <p className="text-[10px] text-slate-500">Ask about your LE8 score and risks</p>
              </div>
           </div>
           {messages.length > 0 && (
@@ -621,7 +682,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ userProfile, simulationData, onCl
                    <MessageSquare size={20} />
                 </div>
                 <h4 className="text-sm font-bold text-slate-700 mb-1">Have questions?</h4>
-                <p className="text-xs text-slate-500 px-4 mb-6">I can explain your risks, scenarios, and health score in more detail.</p>
+                <p className="text-xs text-slate-500 px-4 mb-6">I can explain your risks, scenarios, and LE8 score in more detail.</p>
                 <div className="flex flex-col gap-2 px-4">
                    {suggestedQuestions.map((q, i) => (
                       <button 
@@ -795,8 +856,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
             <div className="flex flex-row gap-3">
                <div className="flex-1 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between group">
                  <div>
-                   <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1">Current Health Score</div>
-                   <div className="text-xs text-slate-500">Biological Vitality</div>
+                   <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-0.5 flex items-center gap-1">AHA CVH Score (Life's Essential 8*)</div>
+                   <div className="text-xs text-slate-500">Current Health Status</div>
                  </div>
                  <div className="flex items-baseline gap-0.5">
                    <div className="text-3xl font-black text-slate-800">{activeData.healthScoreCurrent}</div>
@@ -815,6 +876,8 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                  </div>
                </div>
             </div>
+            
+            <p className="text-[9px] text-slate-400 italic text-right -mt-4 mb-4">*Estimated from your inputs; some components use proxies if no measurements were provided.</p>
 
             {/* 2. Detailed Metrics Panel (New) */}
             <div className="bg-white/60 p-4 rounded-2xl border border-white shadow-sm grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -835,6 +898,11 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                   <span className="text-xl font-bold text-slate-800">{calculateWHR(userProfile.waistCm, userProfile.hipCm)}</span>
                </div>
             </div>
+
+            {/* 2b. LE8 Breakdown */}
+            {activeData.additionalMetrics?.ahaLe8?.components && (
+               <Le8Breakdown components={activeData.additionalMetrics.ahaLe8.components} />
+            )}
 
             {/* 3. Scenario & Simulation Controls */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">

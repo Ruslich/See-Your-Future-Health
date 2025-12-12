@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { UserProfile, SimulationResponse, Gender, ActivityLevel, DietQuality, FastFoodFrequency } from "../types";
+import { UserProfile, SimulationResponse, Gender, ActivityLevel, DietQuality, FastFoodFrequency, Le8Summary, Le8ComponentScore } from "../types";
 
 // --- Metric Calculators (Deterministic) ---
 
@@ -67,24 +67,6 @@ const calculateCVDRiskProxy = (p: UserProfile, bmi: number) => {
   if (p.activityLevel === ActivityLevel.Sedentary) riskScore *= 1.2;
 
   return Math.min(99, Number(riskScore.toFixed(1)));
-};
-
-// Health Score (0-100)
-const calculateHealthScore = (p: UserProfile, bmi: number, smoker: boolean) => {
-  let score = 100;
-  score -= (p.age - 20) * 0.3; 
-  if (bmi > 30) score -= 15;
-  else if (bmi > 25) score -= 5;
-  if (smoker) score -= 20;
-
-  if (p.activityLevel === ActivityLevel.Sedentary) score -= 10;
-  else if (p.activityLevel === ActivityLevel.Active) score += 5;
-
-  score -= (p.existingConditions.length * 10);
-
-  if (p.sleepHours < 6) score -= 5;
-
-  return Math.max(10, Math.min(100, Math.round(score)));
 };
 
 
@@ -191,6 +173,162 @@ const calcDietScore = (quality: DietQuality, fastFood: FastFoodFrequency) => {
   return { score, level, qVal, ffVal };
 };
 
+// --- AHA Life's Essential 8 Calculation ---
+
+const calculateLe8Summary = (
+  p: UserProfile, 
+  bmi: number, 
+  activityInfo: ReturnType<typeof calcActivityGuidelines>, 
+  dietInfo: ReturnType<typeof calcDietScore>
+): Le8Summary => {
+  const components: Le8ComponentScore[] = [];
+  const sourceAHA = { title: "AHA Life's Essential 8", url: "https://www.heart.org/en/healthy-living/healthy-lifestyle/lifes-essential-8" };
+
+  // 1. Diet (Proxy)
+  components.push({
+    id: "diet",
+    label: "Diet",
+    score: dietInfo.score,
+    basis: "proxy",
+    note: "Approximation based on reported diet quality and fast food intake.",
+    sources: [sourceAHA]
+  });
+
+  // 2. Physical Activity (Proxy)
+  let paScore = 0;
+  const mvpa = activityInfo.mvpaMinutesProxyPerWeek;
+  if (mvpa >= 150) paScore = 100;
+  else if (mvpa >= 90) paScore = 80;
+  else if (mvpa >= 60) paScore = 60;
+  else if (mvpa >= 30) paScore = 40;
+  else if (mvpa >= 1) paScore = 20;
+  else paScore = 0;
+  
+  components.push({
+    id: "physical_activity",
+    label: "Physical Activity",
+    score: paScore,
+    basis: "proxy",
+    valueLabel: `${mvpa} min/wk (Est.)`,
+    note: "Estimated from daily step count.",
+    sources: [sourceAHA]
+  });
+
+  // 3. Nicotine Exposure
+  let nicotineScore = 100;
+  if (p.smoker) {
+    nicotineScore = 0;
+  } else {
+    // Former smoker logic
+    if (p.yearsSinceQuit !== undefined && p.yearsSinceQuit > 0) {
+      if (p.yearsSinceQuit >= 5) nicotineScore = 100;
+      else if (p.yearsSinceQuit >= 1) nicotineScore = 75;
+      else nicotineScore = 50; // < 1 year
+    } else if (p.yearsSmoked && p.yearsSmoked > 0 && !p.yearsSinceQuit) {
+       // Just quit recently fallback
+       nicotineScore = 50; 
+    } else {
+       // Never smoker
+       nicotineScore = 100;
+    }
+  }
+  components.push({
+    id: "nicotine",
+    label: "Nicotine Exposure",
+    score: nicotineScore,
+    basis: "self_report",
+    valueLabel: p.smoker ? "Smoker" : (p.yearsSinceQuit ? `Quit ${p.yearsSinceQuit}y ago` : "Never Smoked"),
+    sources: [sourceAHA]
+  });
+
+  // 4. Sleep Health
+  let sleepScore = 100;
+  const s = p.sleepHours;
+  if (s >= 7 && s <= 9) sleepScore = 100;
+  else if ((s >= 6 && s < 7) || (s > 9 && s < 10)) sleepScore = 70; // 9.9 is close to 10
+  else if ((s >= 5 && s < 6) || (s >= 10 && s < 11)) sleepScore = 40;
+  else sleepScore = 0; // < 5 or >= 11
+
+  components.push({
+    id: "sleep",
+    label: "Sleep Health",
+    score: sleepScore,
+    basis: "self_report",
+    valueLabel: `${s} hrs/night`,
+    sources: [sourceAHA]
+  });
+
+  // 5. BMI
+  let bmiScore = 100;
+  if (bmi < 25) bmiScore = 100;
+  else if (bmi < 30) bmiScore = 70;
+  else if (bmi < 35) bmiScore = 40;
+  else if (bmi < 40) bmiScore = 20;
+  else bmiScore = 0;
+
+  components.push({
+    id: "bmi",
+    label: "Body Mass Index",
+    score: bmiScore,
+    basis: "measured",
+    valueLabel: `${bmi}`,
+    sources: [sourceAHA]
+  });
+
+  // 6. Blood Lipids (Proxy)
+  const hasCholesterol = p.existingConditions.includes("High Cholesterol");
+  components.push({
+    id: "blood_lipids",
+    label: "Blood Lipids",
+    score: hasCholesterol ? 30 : 80,
+    basis: hasCholesterol ? "self_report" : "unknown",
+    valueLabel: hasCholesterol ? "History of High Chol." : "No Diagnosis",
+    note: hasCholesterol ? "Based on reported history." : "No cholesterol values provided; using conservative default.",
+    sources: [sourceAHA]
+  });
+
+  // 7. Blood Glucose (Proxy)
+  const hasDiabetes = p.existingConditions.includes("Type 2 Diabetes");
+  components.push({
+    id: "blood_glucose",
+    label: "Blood Glucose",
+    score: hasDiabetes ? 10 : 80,
+    basis: hasDiabetes ? "self_report" : "unknown",
+    valueLabel: hasDiabetes ? "Type 2 Diabetes" : "No Diagnosis",
+    note: hasDiabetes ? "Based on reported diabetes." : "No glucose values provided; using conservative default.",
+    sources: [sourceAHA]
+  });
+
+  // 8. Blood Pressure (Proxy)
+  const hasBP = p.existingConditions.includes("Hypertension");
+  components.push({
+    id: "blood_pressure",
+    label: "Blood Pressure",
+    score: hasBP ? 30 : 80,
+    basis: hasBP ? "self_report" : "unknown",
+    valueLabel: hasBP ? "Hypertension" : "No Diagnosis",
+    note: hasBP ? "Based on reported hypertension." : "No BP values provided; using conservative default.",
+    sources: [sourceAHA]
+  });
+
+  const totalScore = Math.round(components.reduce((acc, c) => acc + c.score, 0) / 8);
+  
+  // Confidence Logic
+  const measuredOrSelf = components.filter(c => c.basis === "measured" || c.basis === "self_report").length;
+  const unknownOrProxy = 8 - measuredOrSelf;
+  
+  let confidence: "low" | "medium" | "high" = "medium";
+  if (measuredOrSelf >= 5) confidence = "high";
+  if (unknownOrProxy >= 4) confidence = "low";
+
+  return {
+    totalScore,
+    components,
+    dataCompleteness: { measuredCount: measuredOrSelf, proxyCount: unknownOrProxy, total: 8 },
+    confidence
+  };
+};
+
 
 // --- Helper to extract full text and avoid truncation ---
 function getFullText(resp: any): string {
@@ -221,6 +359,9 @@ COMMUNICATION & TRANSPARENCY RULES (STRICT):
 3. Do NOT invent numbers. If a value is missing in the prompt, state that it is missing.
 4. Do NOT increase numeric precision (e.g., if input is 12%, do not output 12.34%).
 5. THIS IS NOT A DIAGNOSIS. Always imply these are statistical estimates based on averages.
+6. SCORING STANDARD: Use "AHA Life's Essential 8 (LE8) cardiovascular health score (estimated)" for all "health score" fields.
+   - When explaining score changes, explicitly reference LE8 components (Sleep, Diet, Nicotine, etc).
+   - Never claim lab measurements were taken; use the provided proxies.
 
 **Output Structure (JSON):**
 Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCULATED risk cards into your output.
@@ -241,8 +382,8 @@ Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCU
     }
   ],
   "suggestedAction": "One clear, actionable lifestyle change.",
-  "healthScoreCurrent": <NUMBER: Use provided current score>,
-  "healthScoreFuture": <NUMBER: Projected score in 10 years based on risk factors>,
+  "healthScoreCurrent": <NUMBER: Use provided LE8 Total Score>,
+  "healthScoreFuture": <NUMBER: Projected LE8 Score in 10 years based on risk factors>,
   "lifeExpectancy": <NUMBER: Estimated age based on current health score>,
   "predictedConditions": [
     { "condition": "Condition Name", "onsetAge": <NUMBER: Conservative estimate> }
@@ -334,6 +475,7 @@ Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCU
 
 **TRAJECTORY DATA REQUIREMENTS (STRICT):**
 - trajectory MUST contain 6–11 points (yearly) from current age to +10 years.
+- trajectory.score represents the AHA LE8 Score (0-100).
 - weightTrajectory MUST contain the SAME number of points and matching ages.
 - Each weightTrajectory item must be: {"age": <number>, "weight": <number>} (kg).
 
@@ -363,6 +505,7 @@ Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCU
 - Alcohol: "WHO Europe: No safe level" (https://www.who.int/europe/news/item/04-01-2023-no-level-of-alcohol-consumption-is-safe-for-our-health)
 - Smoking: "CDC Benefits of Quitting" (https://www.cdc.gov/tobacco/about/benefits-of-quitting.html)
 - Diet: "WHO Healthy Diet" (https://www.who.int/news-room/fact-sheets/detail/healthy-diet)
+- General Health Score: "AHA Life's Essential 8" (https://www.heart.org/en/healthy-living/healthy-lifestyle/lifes-essential-8)
 `;
 
 export const generateHealthProjection = async (profile: UserProfile): Promise<SimulationResponse> => {
@@ -374,8 +517,7 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
     const whr = calculateWHR(profile.waistCm, profile.hipCm);
     const findriscScore = calculateFindrisc(profile, bmi);
     const cvdRiskPercent = calculateCVDRiskProxy(profile, bmi);
-    const currentHealthScore = calculateHealthScore(profile, bmi, profile.smoker);
-
+    
     // --- New Deterministic Logic ---
     const stepsCat = calcStepsCategory(profile.dailySteps);
     const activityInfo = calcActivityGuidelines(profile.dailySteps);
@@ -383,6 +525,10 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
     const alcoholInfo = calcAlcoholRisk(profile.alcoholDrinksPerWeek, profile.gender, profile.maxDrinksPerOccasion);
     const smokingInfo = calcSmokingRisk(profile);
     const dietInfo = calcDietScore(profile.dietQuality, profile.fastFoodFrequency);
+
+    // --- AHA LE8 Score ---
+    const le8 = calculateLe8Summary(profile, bmi, activityInfo, dietInfo);
+    const currentHealthScore = le8.totalScore;
 
     // FINDRISC Probability Mapping
     let diabetesProb = 1;
@@ -392,6 +538,7 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
     else if (findriscScore > 20) diabetesProb = 50;
 
     const additionalMetrics = {
+        ahaLe8: le8,
         physicalActivity: {
             ...activityInfo,
             stepsCategory: stepsCat,
@@ -419,7 +566,8 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
     const debugCalculations = {
         stepsCategory: { inputs: profile.dailySteps, result: stepsCat },
         sedentary: { inputs: profile.sittingHours, result: sedentaryRisk },
-        diet: { inputs: {q: dietInfo.qVal, ff: dietInfo.ffVal}, formula: "base - penalty", result: dietInfo.score }
+        diet: { inputs: {q: dietInfo.qVal, ff: dietInfo.ffVal}, formula: "base - penalty", result: dietInfo.score },
+        le8: { total: le8.totalScore, components: le8.components }
     };
 
     const prompt = `
@@ -437,7 +585,10 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
       **APP CALCULATED METRICS (Must use these):**
       1. FINDRISC (Diabetes): ${findriscScore}/26 (${diabetesProb}%)
       2. CVD Risk Proxy: ${cvdRiskPercent}%
-      3. Bio-Vitality Score: ${currentHealthScore}/100
+      3. AHA LE8 Total Score (Estimated): ${currentHealthScore}/100
+      
+      **AHA LE8 Components:**
+      ${JSON.stringify(le8.components)}
       
       **DETERMINISTIC RISK DATA (Insert these as Risk Cards):**
       - Physical Activity Risk: ${activityInfo.overallMeetsMinimumGuideline ? "Low" : "High"} (Steps Category: ${stepsCat})
@@ -454,6 +605,9 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
       - Use the MANDATORY SOURCE MAPPINGS provided in system instructions for these cards.
       - Include 'additionalMetrics' and 'debugCalculations' objects provided below exactly as is.
       - Generate 'scenarios' and 'chartSpecs' as per the schema rules.
+      - Use LE8 score as the main trajectory score in 'trajectory' array.
+      - When explaining, reference AHA Life's Essential 8 and include links (heart.org page is enough).
+      - Never claim lab measurements; if BP/lipids/glucose are proxies, say so.
       
       additionalMetrics: ${JSON.stringify(additionalMetrics)}
       debugCalculations: ${JSON.stringify(debugCalculations)}
@@ -611,7 +765,7 @@ OUTPUT FORMAT (Plain Text Only, EXACT headings; NO markdown):
 DIRECT ANSWER: <1–2 sentences, finish the thought.>
 
 PERSONALIZED IMPACT
-• <3–6 bullets. Each bullet MUST include at least 1 of the user’s metrics (BMI, WHR, steps, sitting hours, alcohol/wk, smoker/pack-years, DietScore, Current/Future Health Score).>
+• <3–6 bullets. Each bullet MUST include at least 1 of the user’s metrics (BMI, WHR, steps, LE8 component scores).>
 • <If user asks “what if I do X”, include how X would shift at least 2 of those metrics (conservatively).>
 
 EVIDENCE
@@ -650,12 +804,17 @@ export const chatWithHealthAssistant = async (
     const activity = `Steps: ${profile.dailySteps} (${simulation.additionalMetrics?.physicalActivity?.stepsCategory}), Sitting: ${profile.sittingHours}h/day, Sleep: ${profile.sleepHours}h`;
     const alcohol = `Alcohol: ${profile.alcoholDrinksPerWeek} drinks/wk (Binge: ${simulation.additionalMetrics?.alcohol?.bingeFlag ? 'Yes' : 'No'})`;
     const diet = simulation.additionalMetrics?.diet ? `DietScore: ${simulation.additionalMetrics.diet.score}/100` : '';
+    
+    // LE8 Context
+    const le8 = simulation.additionalMetrics?.ahaLe8 as Le8Summary | undefined;
+    const le8Breakdown = le8 ? le8.components.map(c => `${c.label}: ${c.score} (${c.valueLabel || c.basis})`).join(', ') : 'Not available';
 
     // Construct Context Pack
     const contextPack = `
       PROFILE: ${profile.age}y ${profile.gender}, BMI ${bmi}, WHR ${whr}
       METRICS: ${activity}, ${smoking}, ${alcohol}, ${diet}
-      SCORES: Current ${simulation.healthScoreCurrent} -> Future ${simulation.healthScoreFuture}
+      AHA LE8 SCORE: Current ${simulation.healthScoreCurrent} -> Future ${simulation.healthScoreFuture}
+      LE8 BREAKDOWN: ${le8Breakdown}
       RISKS:
       ${simulation.riskCards.slice(0, 3).map(r => `- ${r.title} (${r.probability}%): ${r.riskLevel}`).join('\n')}
     `;

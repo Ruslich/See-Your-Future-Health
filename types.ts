@@ -86,6 +86,29 @@ export interface DiseasePrediction {
   onsetAge: number;
 }
 
+// --- AHA LE8 Types ---
+
+export type Le8ComponentId =
+  | "diet" | "physical_activity" | "nicotine" | "sleep"
+  | "bmi" | "blood_lipids" | "blood_glucose" | "blood_pressure";
+
+export interface Le8ComponentScore {
+  id: Le8ComponentId;
+  label: string;
+  score: number; // 0-100
+  basis: "measured" | "self_report" | "proxy" | "unknown";
+  valueLabel?: string; 
+  note?: string;
+  sources: { title: string; url: string }[];
+}
+
+export interface Le8Summary {
+  totalScore: number;            // avg of component scores
+  components: Le8ComponentScore[];
+  dataCompleteness: { measuredCount: number; proxyCount: number; total: number };
+  confidence: "low" | "medium" | "high";
+}
+
 // --- New Scenario Types ---
 
 export interface ScenarioModifiedInput {
@@ -186,8 +209,8 @@ export interface ChartSpec {
 export interface SimulationResponse {
   riskCards: RiskCard[];
   suggestedAction: string;
-  healthScoreCurrent: number;
-  healthScoreFuture: number;
+  healthScoreCurrent: number; // Now represents LE8 score
+  healthScoreFuture: number;  // Now represents LE8 score
   lifeExpectancy: number;
   predictedConditions: DiseasePrediction[];
   organHighlights: string[];

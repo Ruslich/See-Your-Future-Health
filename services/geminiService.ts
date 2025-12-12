@@ -197,10 +197,7 @@ You are "See Your Future Health", a health interpretation engine.
 
 COMMUNICATION & TRANSPARENCY RULES (STRICT):
 1. Do NOT say "I simulated...", "I ran complex simulations", "I accessed biobank data", or "My AI model predicted...".
-2. INSTEAD use honest, transparent phrasing:
-   - "This app uses established tools (like QRISK3 for heart disease and FINDRISC for diabetes) together with WHO BMI guidelines. I'm explaining the scores that were already computed for you."
-   - "Based on the standard risk scores calculated..."
-   - "Standard population data suggests..."
+2. Any explanatory phrasing MUST be placed ONLY inside JSON string fields (e.g., summary, interpretation). Never output any text outside the JSON object. Return JSON only.
 3. Do NOT invent numbers. If a value is missing in the prompt, state that it is missing.
 4. Do NOT increase numeric precision (e.g., if input is 12%, do not output 12.34%).
 5. THIS IS NOT A DIAGNOSIS. Always imply these are statistical estimates based on averages.
@@ -239,8 +236,101 @@ Return a JSON object strictly matching this schema. You must MERGE the PRE-CALCU
     {"age": 30, "weight": 75}
   ],
   "additionalMetrics": <Include the provided additionalMetrics object exactly>,
-  "debugCalculations": <Include the provided debugCalculations object exactly>
+  "debugCalculations": <Include the provided debugCalculations object exactly>,
+  "scenarios": {
+    "baselineAssumptions": "string",
+    "definitions": {
+      "status_quo": "string",
+      "small_changes": "string",
+      "big_changes": "string"
+    },
+    "items": [
+      {
+        "id": "status_quo|small_changes|big_changes",
+        "label": "string",
+        "modifiedInputs": [
+          {
+            "field": "string",
+            "from": "number|string|boolean|null",
+            "to": "number|string|boolean|null",
+            "note": "string"
+          }
+        ],
+        "projected": {
+          "healthScoreTrajectory": [{ "age": 30, "value": 80 }],
+          "weightTrajectory": [{ "age": 30, "value": 75, "unit": "kg" }],
+          "riskCardDeltaSummary": [
+            {
+              "riskCardId": "string",
+              "fromRiskLevel": "low|moderate|high|very_high|insufficient_data",
+              "toRiskLevel": "low|moderate|high|very_high|insufficient_data",
+              "whyChanged": "string"
+            }
+          ]
+        },
+        "uncertainty": {
+          "level": "low|medium|high",
+          "band": {
+            "healthScore": { "minus": 0, "plus": 0, "unit": "points" },
+            "weight": { "minus": 0, "plus": 0, "unit": "kg" }
+          },
+          "reasons": ["string"]
+        },
+        "topDrivers": [
+          {
+            "driverId": "string",
+            "label": "string",
+            "direction": "improves|worsens",
+            "estimatedImpact": { "points": 0, "unit": "health_score_points" },
+            "evidenceNote": "string"
+          }
+        ],
+        "milestones": [
+          {
+            "age": 0,
+            "type": "threshold_crossed|guideline_met|risk_reduced|risk_increased",
+            "title": "string",
+            "detail": "string"
+          }
+        ]
+      }
+    ]
+  },
+  "chartSpecs": [
+    {
+      "id": "string",
+      "type": "stacked_contribution_bar|bullet_target|timeline_milestones",
+      "title": "string",
+      "subtitle": "string",
+      "description": "string",
+      "data": "ANY (Array or Object depending on type)",
+      "axes": { "x": { "label": "string", "unit": "string" }, "y": { "label": "string", "unit": "string" } },
+      "tooltips": { "enabled": true, "template": "string" },
+      "thresholds": [{ "label": "string", "from": 0, "to": 100, "unit": "string", "color": "string" }],
+      "sources": [{ "title": "string", "url": "string" }]
+    }
+  ]
 }
+
+**SCENARIO RULES (Follow Strictly):**
+1. **status_quo**: No behavior changes. Reflect current trajectory.
+2. **small_changes**: Pick 2–3 realistic adjustments based on available user fields (e.g., +steps, -sitting, reduce alcohol, improve diet rating).
+3. **big_changes**: Pick stronger but plausible adjustments. If smoker, include cessation if fields allow.
+4. **Uncertainty**: If multiple fields missing or habits unknown, level MUST be "high". List reasons.
+5. **Top Drivers**: 3–6 drivers explaining the difference. Keep impacts conservative.
+6. **Milestones**: 4–10 entries per scenario (e.g., "Meets activity guideline", "Risk threshold avoided"). Do not invent labs.
+
+**CHART SPEC RULES (Follow Strictly):**
+1. **stacked_contribution_bar**: For each MAJOR risk card (Diabetes, CVD, etc.), break down the calculated risk/probability into 4-8 named contributors (e.g., "Age", "BMI", "Inactivity", "Diet"). 
+   - Weights must be heuristic estimates based on standard risk models (e.g., FINDRISC) but must sum to the probability or 100%.
+   - Data Structure: [{ "label": "Age", "value": 20, "color": "#..." }, ...]
+2. **bullet_target**: Create for 'steps', 'sitting', 'alcohol', 'sleep'.
+   - Include thresholds/targets clearly labeled (e.g., 'Minimum', 'Optimal').
+   - Data Structure: { "current": 5000, "target": 10000, "min": 0, "max": 20000, "ranges": [{ "label": "Sedentary", "max": 5000 }, ...] }
+   - **Citations**: If you reference a guideline target, include sources with authoritative links in the 'sources' field.
+3. **timeline_milestones**: Create one for each scenario ID.
+   - Data must be directly derived from "scenarios.items[].milestones".
+   - Data Structure: Array of milestone objects.
 
 **MANDATORY SOURCE MAPPINGS (Do not deviate):**
 - Physical Activity: "WHO physical activity recommendations" (https://www.who.int/initiatives/behealthy/physical-activity)
@@ -338,6 +428,7 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
       - For these specific cards, use the 'Risk Level' calculated above.
       - Use the MANDATORY SOURCE MAPPINGS provided in system instructions for these cards.
       - Include 'additionalMetrics' and 'debugCalculations' objects provided below exactly as is.
+      - Generate 'scenarios' and 'chartSpecs' as per the schema rules.
       
       additionalMetrics: ${JSON.stringify(additionalMetrics)}
       debugCalculations: ${JSON.stringify(debugCalculations)}
@@ -355,9 +446,59 @@ export const generateHealthProjection = async (profile: UserProfile): Promise<Si
     const text = response.text;
     if (!text) throw new Error("No response from AI");
 
-    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    function extractJson(text: string): string {
+      const t = text.trim();
 
-    return JSON.parse(cleanJson) as SimulationResponse;
+      // 1) Prefer fenced ```json ... ``` blocks
+      const fenced = t.match(/```json\s*([\s\S]*?)\s*```/i);
+      if (fenced?.[1]) return fenced[1].trim();
+
+      // 2) Then any fenced ``` ... ``` block
+      const anyFence = t.match(/```\s*([\s\S]*?)\s*```/);
+      if (anyFence?.[1]) return anyFence[1].trim();
+
+      // 3) Fallback: take substring from first '{' to last '}' (common when model adds preface)
+      const firstObj = t.indexOf("{");
+      const lastObj = t.lastIndexOf("}");
+      if (firstObj !== -1 && lastObj !== -1 && lastObj > firstObj) {
+        return t.slice(firstObj, lastObj + 1).trim();
+      }
+
+      // 4) Fallback: try array JSON
+      const firstArr = t.indexOf("[");
+      const lastArr = t.lastIndexOf("]");
+      if (firstArr !== -1 && lastArr !== -1 && lastArr > firstArr) {
+        return t.slice(firstArr, lastArr + 1).trim();
+      }
+
+      throw new Error("NO_JSON_FOUND");
+    }
+
+    // ...
+
+    const rawText = response.text;
+    if (!rawText) throw new Error("NO_TEXT_FROM_GEMINI");
+
+    let parsed: any;
+    try {
+      const jsonStr = extractJson(rawText);
+      parsed = JSON.parse(jsonStr);
+    } catch (e: any) {
+      console.error("Gemini raw response (first 1200 chars):", rawText.slice(0, 1200));
+
+      // Distinguish parse vs actual network/api issues
+      const msg =
+        e?.name === "SyntaxError"
+          ? "AI_RESPONSE_NOT_JSON"
+          : e?.message === "NO_JSON_FOUND"
+            ? "AI_RESPONSE_NO_JSON_BLOCK"
+            : "AI_RESPONSE_PARSE_FAILED";
+
+      throw new Error(msg);
+    }
+
+    return parsed;
+
 
   } catch (error) {
     console.error("Gemini API Error:", error);

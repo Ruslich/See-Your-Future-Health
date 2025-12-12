@@ -1,7 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { SimulationResponse, UserProfile, RiskCard, ActivityLevel, DietQuality, FastFoodFrequency, Gender, WeightPoint } from '../types';
+import { SimulationResponse, UserProfile, RiskCard, ActivityLevel, DietQuality, FastFoodFrequency, Gender, WeightPoint, ChartSpec, ScenarioItem } from '../types';
 import { generateHealthProjection, explainHealthInsight } from '../services/geminiService';
-import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle } from 'lucide-react';
+import { RefreshCw, Activity, Heart, BookOpen, ArrowUpRight, ChevronLeft, ChevronRight, Zap, CigaretteOff, Apple, Dumbbell, Clock, TrendingUp, Info, Search, UtensilsCrossed, MessageCircle, X, Send, Scale, Flame, Ruler, Maximize2, HelpCircle, Target, GitBranch, ArrowRight } from 'lucide-react';
+import BulletTargetCard from './BulletTargetCard';
+import StackedContributionCard from './StackedContributionCard';
+import MilestoneTimelineCard from './MilestoneTimelineCard';
 
 interface DashboardProps {
   data: SimulationResponse;
@@ -274,7 +277,7 @@ const ExpandedChartOverlay: React.FC<ExpandedChartProps> = ({ type, data, simula
 // 1. Chart
 const ComparisonChart: React.FC<{ 
   original: { age: number; score: number }[]; 
-  simulated?: { age: number; score: number }[]; 
+  simulated?: { age: number; score: number }[] | null; 
   label: string;
   onExpand: () => void;
 }> = ({ original, simulated, label, onExpand }) => {
@@ -352,9 +355,10 @@ const ComparisonChart: React.FC<{
 // 2. Weight Chart
 const WeightChart: React.FC<{
   trajectory: WeightPoint[];
+  comparison?: { age: number; weight: number }[] | null;
   label: string;
   onExpand: () => void;
-}> = ({ trajectory, label, onExpand }) => {
+}> = ({ trajectory, comparison, label, onExpand }) => {
   if (!trajectory || trajectory.length === 0) return null;
 
   const width = 100;
@@ -365,12 +369,12 @@ const WeightChart: React.FC<{
   const maxAge = trajectory[trajectory.length - 1].age;
   const ageRange = maxAge - minAge;
   
-  const weights = trajectory.map(t => t.weight);
-  const minWeight = Math.min(...weights) - 5;
-  const maxWeight = Math.max(...weights) + 5;
+  const allWeights = [...trajectory.map(t => t.weight), ...(comparison ? comparison.map(c => c.weight) : [])];
+  const minWeight = Math.min(...allWeights) - 5;
+  const maxWeight = Math.max(...allWeights) + 5;
   const weightRange = maxWeight - minWeight;
 
-  const getPoints = (data: WeightPoint[]) => {
+  const getPoints = (data: { age: number; weight: number }[]) => {
     return data.map((pt) => {
       const x = ((pt.age - minAge) / ageRange) * (width - 2 * padding) + padding;
       const y = height - ((pt.weight - minWeight) / weightRange * (height - 2 * padding) + padding);
@@ -394,18 +398,30 @@ const WeightChart: React.FC<{
           
           <polyline 
             fill="none" 
-            stroke="#6366f1" 
-            strokeWidth="2" 
+            stroke={comparison ? "#94a3b8" : "#6366f1"}
+            strokeWidth={comparison ? "1.5" : "2"}
+            strokeDasharray={comparison ? "3 2" : ""}
             points={getPoints(trajectory)} 
             className="animate-draw"
           />
+          
+          {comparison && (
+             <polyline 
+               fill="none" 
+               stroke="#10b981" 
+               strokeWidth="2" 
+               points={getPoints(comparison)} 
+               className="animate-draw"
+             />
+          )}
+
           {trajectory.map((pt, i) => {
              const x = ((pt.age - minAge) / ageRange) * (width - 2 * padding) + padding;
              const y = height - ((pt.weight - minWeight) / weightRange * (height - 2 * padding) + padding);
              return (
                <g key={i}>
-                 <circle cx={x} cy={y} r="1.5" fill="#6366f1" />
-                 {(i === 0 || i === trajectory.length - 1) && (
+                 <circle cx={x} cy={y} r="1.5" fill={comparison ? "#94a3b8" : "#6366f1"} />
+                 {(i === 0 || i === trajectory.length - 1) && !comparison && (
                    <text x={x} y={y - 4} fontSize="3" textAnchor="middle" fill="#4338ca" fontWeight="bold">{pt.weight}kg</text>
                  )}
                </g>
@@ -496,8 +512,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
   const [isSimulating, setIsSimulating] = useState(false);
   const [expandedChart, setExpandedChart] = useState<'health' | 'weight' | null>(null);
   
-  // Compound Simulation State
+  // Scenario & Simulation State
   const [activeScenarios, setActiveScenarios] = useState<Record<string, Partial<UserProfile>>>({});
+  const [selectedScenarioId, setSelectedScenarioId] = useState<"status_quo" | "small_changes" | "big_changes">("status_quo");
 
   const activeData = simulationData || data;
   const currentOrgan = activeData.riskCards[currentCardIndex]?.organ || 'Whole Body';
@@ -544,6 +561,23 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
   const lifeExpectancyDelta = simulationData ? simulationData.lifeExpectancy - data.lifeExpectancy : 0;
   const activeLabels = Object.keys(activeScenarios).join(" + ");
 
+  // Prepare scenario data for charts
+  const selectedScenario = activeData.scenarios?.items?.find(i => i.id === selectedScenarioId);
+  
+  // If we have a selected scenario, map its trajectories for chart comparison
+  const scenarioHealthTrajectory = selectedScenario?.projected?.healthScoreTrajectory?.map(p => ({
+    age: p.age, score: p.value
+  })) || null;
+  
+  const scenarioWeightTrajectory = selectedScenario?.projected?.weightTrajectory?.map(p => ({
+    age: p.age, weight: p.value
+  })) || null;
+
+  // If manual simulation is active, that takes precedence over the selected scenario view in charts
+  const displayHealthSimulated = simulationData ? simulationData.trajectory : (selectedScenarioId !== 'status_quo' ? scenarioHealthTrajectory : null);
+  const displayWeightComparison = simulationData ? simulationData.weightTrajectory : (selectedScenarioId !== 'status_quo' ? scenarioWeightTrajectory : null);
+  const displayLabel = simulationData ? (activeLabels || 'Modified') : (selectedScenario?.label || 'Projected');
+
   return (
     <div className="flex flex-col lg:flex-row h-screen overflow-hidden bg-slate-50">
       
@@ -552,9 +586,9 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
         <ExpandedChartOverlay 
           type={expandedChart}
           data={expandedChart === 'health' ? data.trajectory : activeData.weightTrajectory}
-          simulatedData={expandedChart === 'health' ? simulationData?.trajectory : undefined}
+          simulatedData={expandedChart === 'health' ? (simulationData?.trajectory || scenarioHealthTrajectory || undefined) : undefined}
           dataKey={expandedChart === 'health' ? 'score' : 'weight'}
-          label={activeLabels || 'Projected'}
+          label={displayLabel}
           userProfile={userProfile}
           onClose={() => setExpandedChart(null)}
         />
@@ -591,7 +625,7 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                <div className={`flex-1 p-4 rounded-2xl border shadow-lg text-white relative overflow-hidden flex items-center justify-between transition-all duration-500 ${simulationData ? 'bg-gradient-to-br from-emerald-600 to-emerald-700 border-emerald-500' : 'bg-gradient-to-br from-teal-600 to-teal-700 border-teal-500'}`}>
                  <div className="relative z-10">
                    <div className="text-[10px] text-teal-100 font-bold uppercase tracking-wider mb-0.5">10-Year Outlook</div>
-                   <div className="text-xs text-teal-200">{simulationData ? `Modified: ${activeLabels}` : 'Projected'}</div>
+                   <div className="text-xs text-teal-200">{displayLabel}</div>
                  </div>
                  <div className="flex items-baseline gap-0.5 relative z-10">
                    <div className="text-3xl font-black">{activeData.healthScoreFuture}</div>
@@ -620,11 +654,76 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                </div>
             </div>
 
-            {/* 3. Simulation Toggles */}
+            {/* 3. Scenario & Simulation Controls */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+               
+               {/* Scenario Tabs */}
+               {activeData.scenarios?.items && (
+                 <div className="mb-6">
+                    <div className="flex items-center gap-2 mb-3">
+                      <GitBranch size={14} className="text-teal-600" />
+                      <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Compare Future Scenarios</h2>
+                    </div>
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                      {(['status_quo', 'small_changes', 'big_changes'] as const).map((id) => (
+                        <button
+                          key={id}
+                          onClick={() => setSelectedScenarioId(id)}
+                          className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
+                            selectedScenarioId === id 
+                            ? 'bg-white text-slate-800 shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          {id === 'status_quo' ? 'Status Quo' : id === 'small_changes' ? 'Small Changes' : 'Big Changes'}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Scenario Details */}
+                    {selectedScenario && selectedScenarioId !== 'status_quo' && (
+                       <div className="mt-4 bg-slate-50 border border-slate-100 rounded-xl p-4 animate-fade-in">
+                          <div className="flex items-start justify-between mb-3">
+                             <div className="text-sm font-bold text-slate-800">{selectedScenario.label}</div>
+                             <div className="text-[10px] bg-white px-2 py-1 rounded border border-slate-200 text-slate-500 font-semibold">
+                               Confidence: <span className="uppercase">{selectedScenario.uncertainty?.level || 'Medium'}</span>
+                             </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                             <div>
+                                <h5 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Key Drivers</h5>
+                                <ul className="space-y-1">
+                                   {selectedScenario.topDrivers?.slice(0, 3).map((driver, idx) => (
+                                     <li key={idx} className="text-xs text-slate-600 flex items-center gap-1.5">
+                                       <ArrowRight size={10} className={driver.direction === 'improves' ? 'text-emerald-500' : 'text-amber-500'} />
+                                       {driver.label}
+                                     </li>
+                                   ))}
+                                </ul>
+                             </div>
+                             <div>
+                                <h5 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Modified Inputs</h5>
+                                <div className="flex flex-wrap gap-1.5">
+                                   {selectedScenario.modifiedInputs?.map((input, idx) => (
+                                      <span key={idx} className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100">
+                                         {input.field}: {input.to}
+                                      </span>
+                                   ))}
+                                </div>
+                             </div>
+                          </div>
+                       </div>
+                    )}
+                 </div>
+               )}
+
+               <div className="h-px bg-slate-100 w-full mb-6" />
+
+               {/* Manual Compound Toggles */}
                <div className="flex items-center gap-2 mb-3">
                  <Zap size={14} className="text-amber-500" />
-                 <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Compound Simulations (Toggle Multiple)</h2>
+                 <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Manual Simulations</h2>
                </div>
                <div className="flex flex-wrap gap-2 mb-4">
                  {userProfile.smoker && (
@@ -678,19 +777,66 @@ const Dashboard: React.FC<DashboardProps> = ({ data, userProfile, onReset }) => 
                   {(data.trajectory && data.trajectory.length > 0) && (
                     <ComparisonChart 
                       original={data.trajectory} 
-                      simulated={simulationData?.trajectory} 
-                      label={activeLabels || 'Modified'} 
+                      simulated={displayHealthSimulated} 
+                      label={displayLabel} 
                       onExpand={() => setExpandedChart('health')}
                     />
                   )}
                   {(data.weightTrajectory && data.weightTrajectory.length > 0) && (
                     <WeightChart 
                       trajectory={activeData.weightTrajectory} 
+                      comparison={displayWeightComparison}
                       label="Weight" 
                       onExpand={() => setExpandedChart('weight')}
                     />
                   )}
                </div>
+
+               {/* NEW: Chart Specs & Targets */}
+               {activeData.chartSpecs && activeData.chartSpecs.length > 0 && (
+                 <div className="mt-8 pt-6 border-t border-slate-100">
+                    <div className="flex items-center gap-2 mb-4">
+                       <Target size={14} className="text-indigo-500" />
+                       <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Insights & Targets</h2>
+                    </div>
+                    
+                    {/* Bullet Targets */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                       {activeData.chartSpecs.filter(s => s.type === 'bullet_target').map((spec, i) => (
+                          <BulletTargetCard key={i} spec={spec} />
+                       ))}
+                    </div>
+
+                    {/* Stacked Contributions */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                       {activeData.chartSpecs.filter(s => s.type === 'stacked_contribution_bar').map((spec, i) => (
+                          <StackedContributionCard key={i} spec={spec} />
+                       ))}
+                    </div>
+
+                    {/* Timeline Milestones (Filtered by Selected Scenario if possible) */}
+                    <div className="space-y-4">
+                       {activeData.chartSpecs
+                         .filter(s => s.type === 'timeline_milestones')
+                         .filter(s => {
+                           // Try to match timeline to selected scenario
+                           // Fallback to showing all if id matching isn't explicit
+                           if (s.id && s.id.includes(selectedScenarioId)) return true;
+                           // If chart spec ID is generic or we just want to show timelines for current context
+                           return s.id === selectedScenarioId; 
+                         })
+                         .map((spec, i) => (
+                           <MilestoneTimelineCard key={i} spec={spec} />
+                       ))}
+                       {/* Fallback: if no specific timeline matched the ID, maybe show a generic one or none */}
+                       {activeData.chartSpecs.filter(s => s.type === 'timeline_milestones' && !s.id.includes('status_quo') && !s.id.includes('small_changes') && !s.id.includes('big_changes')).length > 0 && 
+                          activeData.chartSpecs.filter(s => s.type === 'timeline_milestones' && !s.id.includes('status_quo') && !s.id.includes('small_changes') && !s.id.includes('big_changes')).map((spec, i) => (
+                             <MilestoneTimelineCard key={`gen-${i}`} spec={spec} />
+                          ))
+                       }
+                    </div>
+                 </div>
+               )}
 
             </div>
 
